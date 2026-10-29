@@ -43,8 +43,13 @@ C:\gradle\gradle-8.11.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug
 所以推送走 REST API：`git commit` 照常做，然后用
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\push.ps1
+node scripts\push.mjs
 ```
 
-脚本会按 `git ls-files` 上传 blob、建 tree（带 base_tree 做增量）、建 commit、移动 `main` ref，
-效果等价于一次普通推送。网络恢复后可以直接 `git remote set-url` 回 https 用 `git push`。
+脚本按 `git ls-files` 上传 blob、建**全量** tree、建 commit、移动 `main` ref。
+用全量 tree 而不是 base_tree 增量，是因为增量模式删文件要额外塞 `sha:null` 条目，
+漏了就变成「本地已删、远端还在」。
+
+**代价（必须知道）**：脚本拼出来的 commit SHA 与本地不同。本机网络恢复后已经改为
+用远端的 `origin/main` 作为唯一历史（本地历史被重置到 `origin/main`），此后一律用 `git push`。
+这段说明保留，是因为换一台机器或网络再次抽风时还会遇到同样的问题。
