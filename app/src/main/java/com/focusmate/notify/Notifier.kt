@@ -77,7 +77,15 @@ class Notifier(private val context: Context) {
      * 主动发言的通知。文案里只放正文，不做"已送达/已读"的暗示。
      * 返回是否发布成功，调用方据此记录"文字展示"这一步。
      */
-    fun companionSays(text: String): Boolean = try {
+    fun companionSays(text: String): Boolean = companionSays(text, ID_PARTNER)
+
+    /**
+     * 主动消息通知（可指定 ID）。
+     *
+     * 为什么必须能指定 ID：旧实现所有伙伴消息共用一个固定 ID（1003），
+     * 连续两条时后一条会覆盖前一条——用户只看到最后一句，高频场景等于丢消息。
+     */
+    fun companionSays(text: String, notificationId: Int): Boolean = try {
         val open = PendingIntent.getActivity(
             context, 3, Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -90,11 +98,14 @@ class Notifier(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
-        manager.notify(ID_PARTNER, n)
+        manager.notify(notificationId, n)
         true
     } catch (t: Throwable) {
         false
     }
+
+    /** 通知是否可用。被撤销权限时主动引擎要降级，而不是静默丢消息。 */
+    fun canNotify(): Boolean = manager.areNotificationsEnabled()
 
     fun failure(title: String, body: String) {
         val n = Notification.Builder(context, CH_RESULT)
