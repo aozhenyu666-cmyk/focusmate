@@ -66,6 +66,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".alarm.EndActionReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".alarm.BootReceiver"
             android:exported="true"
             android:enabled="true">

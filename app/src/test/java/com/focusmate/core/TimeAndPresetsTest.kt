@@ -48,4 +48,12 @@ class TimeAndPresetsTest {
         assertTrue(s.exceptions.none { it.packageName == "com.tencent.mm" })
         assertTrue(s.exceptions.any { it.reason == AllowReason.CALL })
     }
+
+    @Test
+    fun `沉浸舱把其它 Gemini 宿主包记为目标别名 且放行厂商拨号盘`() {
+        val s = Presets.geminiDock("com.google.android.apps.bard", 0L, Enforcement.OVERLAY_PLUS_A11Y)
+        org.junit.Assert.assertTrue("com.google.android.googlequicksearchbox" in s.targetAliases)
+        org.junit.Assert.assertFalse("com.google.android.apps.bard" in s.targetAliases)
+        org.junit.Assert.assertTrue(s.exceptions.any { it.packageName == "com.android.contacts" })
+    }
 }

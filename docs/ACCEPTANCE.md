@@ -59,7 +59,21 @@
 | U-24 | 重启后按墙钟判定 | PASS |
 | U-25 | 四类前台判定与输入法中性、未知不默认放行 | PASS（7） |
 
-合计：**52 passed / 0 failed**。
+| U-26 | 用户结束记 USER_ENDED；Gemini 跑在 Google App 里也算目标（核验与收起拦截层）；目标别名判定；旧会话文件缺新字段可读；新字段往返；沉浸舱别名与厂商拨号盘 | PASS（7） |
+
+合计：**59 passed / 0 failed**（2026-10-29 云端：纯 JVM 构建 + Robolectric android-all 15 编译检查，未经 AGP；AGP 构建与 lint 需在本机重跑）。
+
+## 代码审查疑点 R-1～R-7（2026-10-29，已改代码，待真机确认）
+
+| 编号 | 疑点 | 处置 | 真机 |
+|---|---|---|---|
+| R-1 | Gemini 聊天界面常在 `googlequicksearchbox` 里，前台核验失败或 Gemini 自己被拦 | 会话加 `targetAliases`，沉浸舱把其它 Gemini 宿主包记为目标 | NOT_RUN |
+| R-2 | 拦截层是可获焦全屏窗口，`rootInActiveWindow` 读到的是本 APP，「回到 Gemini」后拦截层收不起 | 前台改取最上层 `TYPE_APPLICATION` 窗口，再退回事件包名（排除自身）与 `rootInActiveWindow` | NOT_RUN |
+| R-3 | 启动后固定 1.2 秒核验，Gemini 冷启动慢时误判失败 | 6 秒窗口内每 400ms 轮询，期满仍不是目标才失败 | NOT_RUN |
+| R-4 | `EndActionReceiver` 未注册，通知栏「紧急结束」无效 | Manifest 注册（exported=false） | NOT_RUN |
+| R-5 | vivo/iQOO 拨号盘可能是 `com.android.contacts`，会被拦 | 加入通话放行名单；实际包名待真机确认 | NOT_RUN |
+| R-6 | 紧急结束后记成 COMPLETED，违反 D-04 | 会话加 `endedByUser`，核验通过后记 USER_ENDED | NOT_RUN |
+| R-7 | 进程恢复后 0.8 秒核验，无障碍服务未连上即判失败 | 恢复后 15 秒窗口内轮询 | NOT_RUN |
 
 ## 阶段门槛判断
 

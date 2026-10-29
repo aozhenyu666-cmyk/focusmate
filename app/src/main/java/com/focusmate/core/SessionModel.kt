@@ -27,7 +27,19 @@ data class FocusSession(
     /** 当前这条会话「已经挂上去」的限制记录；解除时只处理这些。 */
     @SerialName("owned") val owned: OwnedRestrictions,
     @SerialName("failure") val failure: Failure? = null,
-)
+    /**
+     * 与目标等价的其它包名。Gemini 的聊天界面在不少手机上实际运行在
+     * Google App（googlequicksearchbox）里，前台包名不是 bard 本身。
+     * 旧会话文件没有这个字段，默认空，行为不变。
+     */
+    @SerialName("targetAliases") val targetAliases: List<String> = emptyList(),
+    /** 是否由用户主动结束。解除核验通过后据此记成 USER_ENDED 而不是 COMPLETED（D-04）。 */
+    @SerialName("endedByUser") val endedByUser: Boolean = false,
+) {
+    /** 前台包名是否算作「在目标里」。 */
+    fun isTarget(packageName: String?): Boolean =
+        packageName != null && (packageName == targetPackage || packageName in targetAliases)
+}
 
 @Serializable
 enum class SessionKind {

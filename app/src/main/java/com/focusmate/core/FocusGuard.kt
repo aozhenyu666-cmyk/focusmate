@@ -44,7 +44,7 @@ class FocusGuard(private val clock: WallClock) {
         if (SessionStates.isTerminal(session.state) || session.state == SessionState.RELEASING) {
             return Step(session, emptyList(), rejected = "终态或解除中不接受生效回调")
         }
-        if (observedForeground != session.targetPackage) {
+        if (!session.isTarget(observedForeground)) {
             val failed = session.copy(
                 state = SessionState.FAILED,
                 failure = Failure(
@@ -111,7 +111,7 @@ class FocusGuard(private val clock: WallClock) {
         if (SessionStates.isTerminal(session.state)) {
             return Step(session, emptyList(), rejected = "已是终态")
         }
-        val ending = session.copy(state = SessionState.RELEASING)
+        val ending = session.copy(state = SessionState.RELEASING, endedByUser = true)
         return Step(ending, listOf(Effect.HideOverlay("用户结束：$reason"), Effect.ReleaseRestrictions))
     }
 
@@ -132,7 +132,7 @@ class FocusGuard(private val clock: WallClock) {
             return Step(failed, listOf(Effect.NotifyFailure))
         }
         val completed = session.copy(
-            state = SessionState.COMPLETED,
+            state = if (session.endedByUser) SessionState.USER_ENDED else SessionState.COMPLETED,
             owned = session.owned.copy(overlayFor = emptyList()),
         )
         return Step(completed, listOf(Effect.NotifySessionEnded))

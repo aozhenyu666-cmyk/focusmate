@@ -119,4 +119,36 @@ class ModelTest {
         assertTrue(s.owned.overlayFor.isEmpty())
         assertTrue(s.owned.suspendRequested.isEmpty())
     }
+
+    @Test
+    fun `旧会话文件没有新字段也能读 默认无别名且非用户结束`() {
+        val text = """
+        {
+          "id": "x",
+          "kind": "gemini_dock",
+          "ruleVersion": 1,
+          "targetPackage": "com.google.android.apps.bard",
+          "exceptions": [],
+          "startedAtMillis": 0,
+          "expiresAtMillis": 1000,
+          "plannedDurationMillis": 1000,
+          "state": "enforcing",
+          "enforcement": "overlay_plus_a11y",
+          "owned": { "overlayFor": [], "suspendRequested": [] }
+        }
+        """.trimIndent()
+        val back = json.decodeFromString(FocusSession.serializer(), text)
+        assertTrue(back.targetAliases.isEmpty())
+        assertEquals(false, back.endedByUser)
+        assertEquals(false, back.isTarget("com.google.android.googlequicksearchbox"))
+    }
+
+    @Test
+    fun `别名与用户结束标记序列化往返不丢`() {
+        val s = Presets.geminiDock("com.google.android.apps.bard", 0L, Enforcement.OVERLAY_PLUS_A11Y)
+            .copy(endedByUser = true)
+        val back = json.decodeFromString(FocusSession.serializer(), json.encodeToString(FocusSession.serializer(), s))
+        assertEquals(s.targetAliases, back.targetAliases)
+        assertTrue(back.endedByUser)
+    }
 }

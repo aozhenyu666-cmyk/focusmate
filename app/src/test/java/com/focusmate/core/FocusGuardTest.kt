@@ -216,4 +216,37 @@ class FocusGuardTest {
         try { guard.begin(bad) } catch (e: IllegalArgumentException) { threw = true }
         assertTrue(threw)
     }
+
+    @Test
+    fun `用户结束经核验后记为 USER_ENDED 而不是 COMPLETED`() {
+        val clock = FakeClock()
+        val guard = FocusGuard(clock)
+        val releasing = guard.userEnd(readySession(clock), "紧急结束").session
+        val done = guard.onReleaseVerified(releasing, emptyList())
+        assertEquals(SessionState.USER_ENDED, done.session.state)
+    }
+
+    @Test
+    fun `Gemini 实际跑在 Google App 里也算进入目标`() {
+        val clock = FakeClock()
+        val guard = FocusGuard(clock)
+        val verified = guard.onTargetVerified(guard.begin(dock(clock)).session, "com.google.android.googlequicksearchbox")
+        assertEquals(SessionState.ENFORCING, verified.session.state)
+    }
+
+    @Test
+    fun `拦截中回到 Google App 里的 Gemini 会收起拦截层`() {
+        val clock = FakeClock()
+        val guard = FocusGuard(clock)
+        val session = readySession(clock)
+        val policy = AllowPolicy(
+            session.targetPackage,
+            session.exceptions.map { it.packageName }.toSet(),
+            targetAliases = session.targetAliases.toSet(),
+        )
+        val blocked = guard.onForeground(session, "com.ss.android.ugc.aweme", policy.classify("com.ss.android.ugc.aweme", selfPkg)).session
+        val back = guard.onForeground(blocked, "com.google.android.googlequicksearchbox", policy.classify("com.google.android.googlequicksearchbox", selfPkg))
+        assertEquals(SessionState.ENFORCING, back.session.state)
+        assertTrue(back.effects.any { it is FocusGuard.Effect.HideOverlay })
+    }
 }

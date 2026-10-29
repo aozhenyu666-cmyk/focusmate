@@ -51,4 +51,15 @@ class AllowPolicyTest {
         val c = SystemUiClassifier()
         assertEquals(false, c.isNeutral("com.some.new.app"))
     }
+
+    @Test
+    fun `目标别名判定为目标 不设别名时仍拦截`() {
+        val withAlias = AllowPolicy(
+            target = "com.google.android.apps.bard",
+            exceptions = emptySet(),
+            targetAliases = setOf("com.google.android.googlequicksearchbox"),
+        )
+        assertEquals(AllowPolicy.Verdict.TARGET, withAlias.classify("com.google.android.googlequicksearchbox", self))
+        assertEquals(AllowPolicy.Verdict.BLOCK, policy.classify("com.google.android.googlequicksearchbox", self))
+    }
 }

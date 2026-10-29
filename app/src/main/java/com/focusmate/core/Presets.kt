@@ -25,6 +25,8 @@ object Presets {
         AllowedApp("com.android.dialer", "系统电话", AllowReason.CALL),
         AllowedApp("com.google.android.dialer", "电话", AllowReason.CALL),
         AllowedApp("com.android.server.telecom", "通话服务", AllowReason.CALL),
+        // vivo / iQOO 等厂商的拨号盘挂在联系人包里；待真机 R-5 确认实际包名。
+        AllowedApp("com.android.contacts", "拨号/联系人", AllowReason.CALL),
         AllowedApp("com.android.incallui", "通话界面", AllowReason.CALL),
     )
 
@@ -53,6 +55,7 @@ object Presets {
             state = SessionState.PREPARING,
             enforcement = enforcement,
             owned = OwnedRestrictions(),
+            targetAliases = GEMINI_CANDIDATES.filter { it != geminiPackage },
         )
     }
 

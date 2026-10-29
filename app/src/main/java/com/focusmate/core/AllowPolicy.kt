@@ -11,6 +11,8 @@ class AllowPolicy(
     private val target: String,
     private val exceptions: Set<String>,
     private val systemUi: SystemUiClassifier = SystemUiClassifier(),
+    /** 与目标等价的包名，见 FocusSession.targetAliases。 */
+    private val targetAliases: Set<String> = emptySet(),
 ) {
     enum class Verdict {
         /** 目标应用：正常使用。 */
@@ -29,7 +31,7 @@ class AllowPolicy(
     fun classify(packageName: String?, selfPackage: String): Verdict {
         if (packageName.isNullOrBlank()) return Verdict.NEUTRAL
         if (packageName == selfPackage) return Verdict.NEUTRAL
-        if (packageName == target) return Verdict.TARGET
+        if (packageName == target || packageName in targetAliases) return Verdict.TARGET
         if (packageName in exceptions) return Verdict.EXCEPTION
         if (systemUi.isNeutral(packageName)) return Verdict.NEUTRAL
         return Verdict.BLOCK
@@ -61,6 +63,7 @@ class SystemUiClassifier(
             "com.android.incallui",
             "com.google.android.dialer",
             "com.android.dialer",
+            "com.android.contacts",
             "com.android.server.telecom",
             "com.android.launcher3",
             "com.android.internal.systemui.navbar.gestural",

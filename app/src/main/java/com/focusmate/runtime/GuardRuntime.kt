@@ -127,7 +127,7 @@ object GuardRuntime {
                 expiry.schedule(plan.session.expiresAtMillis, plan.session.id)
                 GuardForegroundService.start(appContext)
                 notifier.guardRunning(plan.session)
-                main.postDelayed({ verifyTargetStillForeground(plan.session.id) }, 800L)
+                scheduleTargetVerify(plan.session.id, RESTORE_VERIFY_WINDOW_MILLIS)
             }
         }
     }
@@ -160,18 +160,37 @@ object GuardRuntime {
         notifier.guardRunning(begun.session)
         applyEffects(begun)
 
-        main.postDelayed({ verifyTargetStillForeground(begun.session.id) }, 1200L)
+        scheduleTargetVerify(begun.session.id, START_VERIFY_WINDOW_MILLIS)
+    }
+
+    /** 冷启动的 Gemini 常常超过 1 秒才到前台；在窗口期内轮询，到期仍不是目标才判失败。 */
+    private const val START_VERIFY_WINDOW_MILLIS = 6_000L
+    /** 重启/进程恢复后无障碍服务可能晚几秒才连上，给更长的窗口。 */
+    private const val RESTORE_VERIFY_WINDOW_MILLIS = 15_000L
+    private const val VERIFY_POLL_MILLIS = 400L
+
+    private fun scheduleTargetVerify(sessionId: String, windowMillis: Long) {
+        val deadline = android.os.SystemClock.elapsedRealtime() + windowMillis
+        main.postDelayed({ verifyTargetStillForeground(sessionId, deadline) }, VERIFY_POLL_MILLIS)
     }
 
     /**
      * 启动后复核前台。这里是旧实现 F-01/F-06 的直接修复点：
      * 启动被厂商系统拒绝时，必须变成 FAILED，而不是停在 PREPARING 假装在守护。
      */
-    private fun verifyTargetStillForeground(sessionId: String) {
+    private fun verifyTargetStillForeground(sessionId: String, deadlineElapsed: Long) {
         val s = current ?: return
         if (s.id != sessionId) return
         if (!SessionStates.isActive(s.state)) return
         val observed = lastForeground
+        if (s.isTarget(observed)) {
+            applyEffects(guard.onTargetVerified(s, observed))
+            return
+        }
+        if (android.os.SystemClock.elapsedRealtime() < deadlineElapsed) {
+            main.postDelayed({ verifyTargetStillForeground(sessionId, deadlineElapsed) }, VERIFY_POLL_MILLIS)
+            return
+        }
         if (observed == null) {
             val detail = if (a11yConnected) {
                 "无障碍服务已连接但读不到前台应用，无法核验是否真的进入目标"
@@ -217,6 +236,7 @@ object GuardRuntime {
         val policy = AllowPolicy(
             target = s.targetPackage,
             exceptions = s.exceptions.map { it.packageName }.toSet(),
+            targetAliases = s.targetAliases.toSet(),
         )
         applyEffects(guard.onForeground(s, packageName, policy.classify(packageName, selfPackage)))
     }
@@ -234,8 +254,9 @@ object GuardRuntime {
         val s = current ?: return
         if (s.id != sessionId) return
         if (!SessionStates.isActive(s.state)) return
-        if (lastForeground == s.targetPackage) {
-            applyEffects(guard.onForeground(s, s.targetPackage, AllowPolicy.Verdict.TARGET))
+        if (s.isTarget(lastForeground)) {
+            retryCount = 0
+            applyEffects(guard.onForeground(s, lastForeground, AllowPolicy.Verdict.TARGET))
         } else {
             // 没回去就保持拦截，不谎报成功；重试有上限，避免无限拉回。
             retryCount++
