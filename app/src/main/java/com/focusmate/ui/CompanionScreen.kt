@@ -23,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,12 +44,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusmate.companion.CompanionHolder
+import com.focusmate.companion.CompanionRuntime
 import com.focusmate.companion.CompanionState
 import com.focusmate.companion.FactStatus
 import com.focusmate.companion.FollowUpStatus
 import com.focusmate.companion.ModelSettings
 import com.focusmate.companion.Utterance
 import com.focusmate.companion.label
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,6 +70,10 @@ fun CompanionScreen() {
     val messages = remember { mutableStateListOf<Utterance>() }
     var draft by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf<String?>(null) }
+    // 聊天发送状态：Sending/Sent/Failed。null = 空闲。
+    var sendState by remember { mutableStateOf<CompanionRuntime.ChatSendState?>(null) }
+    // 主动交流的一句话说明（"专注结束后再找你"这类），不让用户看内部枚举。
+    var statusLine by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val runtime = CompanionHolder.ensureStarted(context)
@@ -82,6 +90,7 @@ fun CompanionScreen() {
         state = runtime.current()
         messages.clear()
         messages.addAll(runtime.current().dialogue.takeLast(60))
+        refreshStatus(runtime) { statusLine = it }
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -121,13 +130,26 @@ fun CompanionScreen() {
                 0 -> ChatTab(
                     messages = messages,
                     draft = draft,
+                    statusLine = statusLine,
+                    sendState = sendState,
                     onDraft = { draft = it },
                     onSend = {
                         val text = draft.trim()
-                        if (text.isNotEmpty()) {
+                        val runtime = CompanionHolder.runtime()
+                        if (text.isNotEmpty() && runtime != null && sendState !is CompanionRuntime.ChatSendState.Sending) {
                             draft = ""
-                            CompanionHolder.runtime()?.userSays(text) { }
+                            runtime.userSays(text, onReply = { }, onState = { s ->
+                                sendState = s
+                                if (s is CompanionRuntime.ChatSendState.Sent || s is CompanionRuntime.ChatSendState.Failed) {
+                                    refreshStatus(runtime) { statusLine = it }
+                                }
+                            })
                         }
+                    },
+                    onRetryLast = {
+                        // 重试 = 把那句话再发一次。失败时客户端没有留下"待重发"队列，
+                        // 所以这里让用户看到原文并要求重发，而不是偷偷重放（避免重复约定）。
+                        sendState = null
                     },
                 )
                 1 -> FactsTab(
@@ -185,11 +207,15 @@ private fun SubSwitcher(labels: List<String>, selected: Int, onSelect: (Int) -> 
 private fun ChatTab(
     messages: List<Utterance>,
     draft: String,
+    statusLine: String,
+    sendState: CompanionRuntime.ChatSendState?,
     onDraft: (String) -> Unit,
     onSend: () -> Unit,
+    onRetryLast: () -> Unit,
 ) {
     val fmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val listState = rememberLazyListState()
+    val sending = sendState is CompanionRuntime.ChatSendState.Sending
 
     // 新消息进来滚到底部。没有这一条，发完看不到自己刚说的话。
     LaunchedEffect(messages.size) {
@@ -197,6 +223,16 @@ private fun ChatTab(
     }
 
     Column(Modifier.fillMaxSize()) {
+        // 主动交流状态：一行说清「为什么现在不主动找你」。
+        if (statusLine.isNotBlank()) {
+            Text(
+                statusLine,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
+        }
+
         if (messages.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 EmptyState(
@@ -220,10 +256,37 @@ private fun ChatTab(
             }
         }
 
+        // 发送状态。失败要能看懂、能重试；成功一闪而过即可。
+        when (sendState) {
+            is CompanionRuntime.ChatSendState.Sending -> {
+                Text(
+                    "正在发送…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+            }
+            is CompanionRuntime.ChatSendState.Failed -> {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        sendState.text,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = LocalSemantic.current.danger,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (sendState.retryable) {
+                        TextButton(onClick = onRetryLast) { Text("重试", style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+            }
+            else -> Unit
+        }
+
         Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -233,24 +296,21 @@ private fun ChatTab(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("说点什么，比如「十分钟后再聊」", style = MaterialTheme.typography.bodyMedium) },
                 maxLines = 4,
+                enabled = !sending,
                 shape = MaterialTheme.shapes.large,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                keyboardActions = KeyboardActions(onSend = { if (!sending) onSend() }),
             )
             Button(
                 onClick = onSend,
+                enabled = !sending,
                 modifier = Modifier.height(52.dp),
                 shape = MaterialTheme.shapes.large,
-            ) { Text("发送", style = MaterialTheme.typography.labelLarge) }
+            ) { Text(if (sending) "发送中" else "发送", style = MaterialTheme.typography.labelLarge) }
         }
     }
 }
 
-/**
- * 消息气泡。
- * 用户靠右、伙伴靠左，颜色区分；主动说的额外标出来——
- * 用户需要能一眼看出"这句是我问出来的"还是"他自己开口的"。
- */
 @Composable
 private fun MessageBubble(u: Utterance, timeText: String) {
     val mine = u.role == Utterance.Role.USER
@@ -496,6 +556,9 @@ private fun SettingsTab(current: CompanionState?) {
     var model by remember { mutableStateOf("") }
     var key by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf<String?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val snapshot = remember { ModelSettings.load(context) }
     val c = current?.config
 
@@ -557,11 +620,61 @@ private fun SettingsTab(current: CompanionState?) {
                         )
                     }
                 }
+
+                // 连接测试：只验证地址/模型/密钥能否走通，不写记忆、不动事项。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = {
+                            testing = true
+                            testResult = null
+                            scope.launch {
+                                val r = CompanionHolder.runtime()?.testModelConnection()
+                                testing = false
+                                testResult = when (r) {
+                                    is com.focusmate.companion.ModelResult.Ok ->
+                                        "连接成功：模型回了一句「" + r.text.take(40) + "」"
+                                    is com.focusmate.companion.ModelResult.Failed ->
+                                        "连接失败：" + r.reason
+                                    com.focusmate.companion.ModelResult.Unconfigured ->
+                                        "还没填完整（地址、模型名、密钥都要有）"
+                                    null -> "运行时没起来，稍后再试"
+                                }
+                            }
+                        },
+                        enabled = !testing,
+                        shape = MaterialTheme.shapes.large,
+                    ) { Text(if (testing) "测试中…" else "测试连接") }
+                }
+                testResult?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (it.startsWith("连接成功")) LocalSemantic.current.success else LocalSemantic.current.danger,
+                    )
+                }
             }
         }
 
         item {
             SettingsSection("主动交流") {
+                // 语音是可关闭的附加能力：关掉后只发文字，语音失败也永不影响文字。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("朗读收到的消息", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (c?.ttsEnabled == true) "用系统 TTS 念出来；失败不影响文字"
+                            else "只显示文字，不朗读",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Button(
+                        onClick = { CompanionHolder.runtime()?.setTtsEnabled(!(c?.ttsEnabled ?: true)) },
+                        shape = MaterialTheme.shapes.extraLarge,
+                    ) { Text(if (c?.ttsEnabled == true) "关掉" else "打开") }
+                }
+                Hairline()
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("没有约定也主动闲聊", style = MaterialTheme.typography.bodyLarge)
@@ -623,4 +736,22 @@ private fun clockText(minuteOfDay: Int): String {
     val h = minuteOfDay / 60
     val m = minuteOfDay % 60
     return (if (h < 10) "0" else "") + h + ":" + (if (m < 10) "0" else "") + m
+}
+
+/** 把当前状态翻译成一行说明。翻译逻辑在 CompanionStatus，这里只负责取值。 */
+private fun refreshStatus(
+    runtime: CompanionRuntime,
+    onText: (String) -> Unit,
+) {
+    val s = runtime.current()
+    val cal = java.util.Calendar.getInstance()
+    val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+    onText(
+        com.focusmate.companion.CompanionStatus.describe(
+            state = s,
+            nowMillis = System.currentTimeMillis(),
+            minuteOfDay = minuteOfDay,
+            inFocusSession = runtime.focusActive(),
+        ),
+    )
 }

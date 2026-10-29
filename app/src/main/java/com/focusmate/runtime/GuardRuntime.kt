@@ -220,15 +220,46 @@ object GuardRuntime {
 
     // ---------------------------------------------------------------- 前台事件
 
+    /**
+     * 无障碍服务连接状态变化。
+     *
+     * 关键：断开不能立即判死。实机踩到两次：
+     * 1. onInterrupt（按返回键触发导航）曾被当成断开 -> 一个按键绕过限制；
+     * 2. 系统在某些窗口事件后会短暂解绑再重绑（AccessibilityManagerService 的
+     *    "wait for adding window timeout"），期间 onUnbind/onDestroy 会走一遍，
+     *    服务几百毫秒后自己回来。若此时把会话判成 FAILED，覆盖层就被撤掉，
+     *    用户正好进到被限制的应用里。
+     *
+     * 所以：断开先进宽限期，宽限期内重连就当作没发生；宽限期满了还没回来，
+     * 才如实判失败（不谎报仍在守护）。真正的「用户关掉无障碍」仍然会被判失败，
+     * 只是晚几秒，这比误判导致限制失效好得多。
+     */
     fun onAccessibilityConnected(connected: Boolean) {
         a11yConnected = connected
-        if (!connected) {
-            val s = current ?: return
+        pendingDisconnectCheck?.let { main.removeCallbacks(it); pendingDisconnectCheck = null }
+        if (connected) return
+
+        val check = Runnable {
+            pendingDisconnectCheck = null
+            if (a11yConnected) return@Runnable // 宽限期内已重连
+            val s = current ?: return@Runnable
             if (SessionStates.isActive(s.state)) {
-                applyEffects(guard.fail(s, FailureCode.A11Y_UNAVAILABLE, "无障碍服务断开，无法继续识别前台；限制已停止"))
+                applyEffects(
+                    guard.fail(
+                        s,
+                        FailureCode.A11Y_UNAVAILABLE,
+                        "无障碍服务断开超过 " + (RECONNECT_GRACE_MILLIS / 1000) + " 秒仍未恢复，无法继续识别前台；限制已停止",
+                    ),
+                )
             }
         }
+        pendingDisconnectCheck = check
+        main.postDelayed(check, RECONNECT_GRACE_MILLIS)
     }
+
+    /** 重连宽限期。太短会误判系统瞬时解绑，太长会让真实断开拖太久。 */
+    private const val RECONNECT_GRACE_MILLIS = 5000L
+    @Volatile private var pendingDisconnectCheck: Runnable? = null
 
     fun reportForeground(packageName: String?) {
         lastForeground = packageName

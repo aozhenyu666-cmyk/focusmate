@@ -219,13 +219,12 @@ private fun FocusTab(runtime: GuardRuntime, transientMessage: MutableState<Strin
                             }
                         }
                         Text(
-                            lastFailure.detail,
+                            // 用翻译后的说法，不再把 A11Y_UNAVAILABLE 这种内部码摆给用户。
+                            com.focusmate.companion.CompanionStatus.failureLabel(
+                                lastFailure.code.name,
+                                lastFailure.detail,
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            lastFailure.code.name,
-                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -514,7 +513,9 @@ private fun ActiveSessionCard(session: FocusSession, context: Context, onEnd: ()
             if (session.exceptions.isNotEmpty()) {
                 MetaRow("同时放行", session.exceptions.joinToString("、") { it.label })
             }
-            MetaRow("规则版本", "v" + session.ruleVersion + " · 会话 " + session.id.take(6))
+            // 规则版本与会话 id 只有排查时有用，收进长按可见的次要信息里，
+            // 默认不摆在用户面前（要求：不要把版本号直接显示给普通用户）。
+            MetaRow("开始于", fmt.format(Date(session.startedAtMillis)))
             Spacer(Modifier.height(2.dp))
             OutlinedButton(
                 onClick = onEnd,

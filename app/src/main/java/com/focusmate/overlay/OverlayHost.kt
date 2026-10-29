@@ -25,9 +25,15 @@ class OverlayHost(private val appContext: Context) {
         boundToService = true
     }
 
+    /**
+     * 服务解绑时调用。
+     *
+     * 注意：不要在这里把 overlay 直接 hide 掉。系统会瞬时解绑重绑，
+     * 一 hide 就会在屏幕上一闪，而状态仍是 BLOCKING，用户看到的是
+     * 「拦截没了但还被拦着」。这里只丢引用，重绑后由下一次前台事件重建。
+     */
     fun unbindServiceWindow() {
         boundToService = false
-        blockOverlay?.let { if (it.isShowing()) it.hide() }
         blockOverlay = null
     }
 

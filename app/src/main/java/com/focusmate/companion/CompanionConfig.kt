@@ -37,6 +37,9 @@ data class CompanionConfig(
     /** 事项有效期：超过就作废，不再补发。 */
     @SerialName("pendingTtlDays") val pendingTtlDays: Int = 14,
 
+    /** 系统 TTS 开关。关掉后只发文字；语音失败也永远不影响文字。 */
+    @SerialName("ttsEnabled") val ttsEnabled: Boolean = true,
+
     /** 允许迟到多久仍算有效（超过就按"迟到"如实说明，不再假装准点）。 */
     @SerialName("lateToleranceMillis") val lateToleranceMillis: Long = 10L * 60_000L,
 ) {

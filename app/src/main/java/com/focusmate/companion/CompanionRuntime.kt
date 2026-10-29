@@ -119,6 +119,24 @@ class CompanionRuntime(
         return true
     }
 
+    /**
+     * 设置页的「测试连接」。只验证地址/模型/密钥能否走通，不写记忆、不动事项。
+     * 结果里不含密钥。
+     */
+    suspend fun testModelConnection(): ModelResult =
+        runCatching { ModelSettings.testConnection(ModelSettings.load(context).config) }
+            .getOrElse { ModelResult.Failed("测试过程出错：" + (it.message ?: it.javaClass.simpleName)) }
+
+    /** 开关系统语音。关掉后只发文字。 */
+    fun setTtsEnabled(enabled: Boolean): Boolean {
+        state = state.copy(
+            config = state.config.copy(ttsEnabled = enabled),
+            memoryVersion = state.memoryVersion + 1,
+        )
+        persist(); publish()
+        return true
+    }
+
     /** 开关主动闲聊。UI 必须有这个入口，否则验收用例 J 无法由用户自行触发。 */
     fun setAllowSmallTalk(enabled: Boolean): Boolean {
         state = state.copy(
@@ -207,9 +225,41 @@ class CompanionRuntime(
 
     /**
      * 用户说话。这是**唯一**的对话入口：解析意图 -> 落事实 -> 回一句 -> 结算事项。
-     * @param onReply 把回复交给界面（已含文字；语音在内部触发）
+     *
+     * 带发送状态的入口。UI 用它显示「发送中 / 成功 / 失败可重试」。
+     *
+     * 为什么单独一个重载而不改原签名：原有调用点（含测试）依赖简单回调，
+     * 直接改会让调用方被迫处理用不到的状态；这里保留旧签名转调新实现。
      */
+    fun userSays(text: String, onReply: (String) -> Unit, onState: (ChatSendState) -> Unit) {
+        sendWithState(text, onReply, onState)
+    }
+
+    /** 聊天发送状态。 */
+    sealed interface ChatSendState {
+        /** 已经记下用户这句话，正在等模型。 */
+        data object Sending : ChatSendState
+
+        /** 成功：文字已经落到对话里并展示。 */
+        data object Sent : ChatSendState
+
+        /** 失败。text 是给用户看的原因（不含密钥）。 */
+        data class Failed(val text: String, val retryable: Boolean) : ChatSendState
+    }
+
+    /** 兼容旧调用点的简单签名。 */
     fun userSays(text: String, onReply: (String) -> Unit) {
+        sendWithState(text, onReply) { }
+    }
+
+    /**
+     * 真正的实现。三段状态都从这一条路径发出，避免 UI 出现"永远转圈"。
+     */
+    private fun sendWithState(
+        text: String,
+        onReply: (String) -> Unit,
+        onState: (ChatSendState) -> Unit,
+    ) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         val t = now()
@@ -231,6 +281,8 @@ class CompanionRuntime(
             // 又说了新话 = 记忆变了：正在生成的那条主动发言必须失效（F-05）。
             memoryVersion = state.memoryVersion + 1,
         )
+        // 已经记下用户这句话，进入等待。UI 从这一刻开始显示「发送中」。
+        onState(ChatSendState.Sending)
 
         // 2) 结构化意图（改期/取消/改锁定请求）
         val openTopic = state.followUps.firstOrNull { it.open }?.topic
@@ -308,12 +360,14 @@ class CompanionRuntime(
                     // 生成期间又说了话/又记了新事实：这份回复的上下文已经过期，丢弃。
                     if (state.memoryVersion != issuedMemoryVersion) {
                         onProblem?.invoke("对话在你回复期间有更新，这一条已丢弃")
+                        onState(ChatSendState.Failed("你在这期间又说了话，这一条已作废。再发一次即可。", retryable = true))
                         return@launch
                     }
                     // 出站审查：Key、本机路径、凭据赋值都不能说出去。
                     val guarded = guardOutbound(result.text.take(300))
                     if (guarded == null) {
                         onProblem?.invoke("这一句触发了出站审查，已拦下未发送")
+                        onState(ChatSendState.Failed("这一句触发了安全检查，没有发出去。", retryable = true))
                         return@launch
                     }
                     val reply = guarded
@@ -332,6 +386,7 @@ class CompanionRuntime(
                         )
                     }
                     onReply(reply)
+                    onState(ChatSendState.Sent)
                     persist(); publish()
                     speakAsync(reply)
                 }
@@ -339,6 +394,8 @@ class CompanionRuntime(
                     val reply = "（还没配好模型，我现在只能记下来，不能好好回应。）"
                     appendCompanion(reply, now(), proactive = false, followUpId = null)
                     onReply(reply)
+                    // 没配模型不是"发送失败"，而是能力未启用：给可重试=false 的说明。
+                    onState(ChatSendState.Failed("还没配置模型，先到设置里填地址、模型名和密钥。", retryable = false))
                     persist(); publish()
                 }
                 is ModelResult.Failed -> {
@@ -347,6 +404,7 @@ class CompanionRuntime(
                     val reply = "（我这边连不上模型，先把你说的记下了。）"
                     appendCompanion(reply, now(), proactive = false, followUpId = null)
                     onReply(reply)
+                    onState(ChatSendState.Failed(result.reason, retryable = result.retryable))
                     persist(); publish()
                 }
             }
@@ -373,7 +431,12 @@ class CompanionRuntime(
         if (proactive) onUtterance?.invoke(u, DeliveryTrace(followUpId, state.epoch.toInt()))
     }
 
+    /**
+     * 播报。受 ttsEnabled 控制：关掉就完全不发声。
+     * 语音是附加能力——失败只记录，不影响文字已经展示这件事。
+     */
     private fun speakAsync(text: String) {
+        if (!state.config.ttsEnabled) return
         speech.speak("u" + now(), text)
     }
 

@@ -36,6 +36,25 @@ object ModelSettings {
         }.apply()
     }
 
+    /**
+     * 连接测试：用一个极小的请求验证「地址 + 模型名 + 密钥」三者能否走通。
+     *
+     * 三条约束：
+     * - 返回的文案里**绝不包含密钥**；
+     * - 不把请求/响应正文写进日志（可能含用户隐私）；
+     * - 只发一句「ping」，不消耗上下文、不写入记忆。
+     */
+    suspend fun testConnection(config: ModelConfig): ModelResult {
+        if (!config.usable) {
+            return ModelResult.Failed("还没填完整：地址、模型名、密钥都要有", retryable = false)
+        }
+        val client = OpenAiCompatibleClient { config }
+        return client.complete(
+            systemPrompt = "You are a health check. Reply with the single word: ok",
+            userPrompt = "ping",
+        )
+    }
+
     fun clearKey(context: Context) {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().remove(KEY_API).apply()
