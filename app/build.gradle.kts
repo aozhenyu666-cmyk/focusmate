@@ -17,7 +17,20 @@ android {
         versionName = "0.1.0-phase1"
     }
 
+    // 固定的公开测试签名：CI 与本机构建出的包可以互相覆盖安装（D-12）。
+    signingConfigs {
+        create("preview") {
+            storeFile = rootProject.file("signing/focusmate-test.jks")
+            storePassword = "focusmate-test"
+            keyAlias = "focusmate"
+            keyPassword = "focusmate-test"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("preview")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

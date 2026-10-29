@@ -24,3 +24,7 @@ Thumbs.db
 
 # 研究用的上游源码副本（体积大且非本仓库版权，见 docs/SOURCES.md）
 docs/_sources/
+
+# 例外：仅用于预览包的公开测试签名（见 docs/DECISIONS.md D-12）。
+# 它让每次 CI 构建都能覆盖安装；不是发布签名，不保护任何秘密。
+!signing/focusmate-test.jks
