@@ -1,0 +1,26 @@
+# Gradle / Android 构建产物，不入库
+.gradle/
+build/
+app/build/
+captures/
+*.iml
+.idea/
+.kotlin/
+
+# 本机路径与本地配置
+local.properties
+
+# 密钥与凭据：任何情况下都不入库
+*.jks
+*.keystore
+keystore/
+secrets.properties
+*.apikey
+.env
+
+# 系统杂项
+.DS_Store
+Thumbs.db
+
+# 研究用的上游源码副本（体积大且非本仓库版权，见 docs/SOURCES.md）
+docs/_sources/

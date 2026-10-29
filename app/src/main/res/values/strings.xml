@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">专注伙伴</string>
+    <string name="a11y_label">专注伙伴 · 前台识别</string>
+    <string name="a11y_description">用于识别当前在前台的应用。专注进行中，除目标应用、通话与微信外，其余应用会被覆盖层拦住。不读取聊天内容，不点击、不输入。</string>
+    <string name="notif_channel_guard">专注守护</string>
+    <string name="notif_guard_title">专注进行中</string>
+    <string name="notif_action_end">紧急结束</string>
+</resources>
