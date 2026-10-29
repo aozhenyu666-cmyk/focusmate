@@ -18,6 +18,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,6 +52,18 @@ import java.util.Locale
 
 @Composable
 fun HomeScreen(runtime: GuardRuntime, transientMessage: MutableState<String>) {
+    var tab by remember { mutableStateOf(0) }
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("专注") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("伙伴") })
+        }
+        if (tab == 0) FocusTab(runtime, transientMessage) else CompanionScreen()
+    }
+}
+
+@Composable
+private fun FocusTab(runtime: GuardRuntime, transientMessage: MutableState<String>) {
     val context = LocalContext.current
     var session by remember { mutableStateOf(runtime.session()) }
     var overlayOk by remember { mutableStateOf(Permissions.hasOverlay(context)) }
