@@ -512,3 +512,37 @@ class PromptTest {
         assertTrue(Prompt.trigger(Turn.Spontaneous, AgentState(), at(10), ZONE)!!.contains("stay_silent"))
     }
 }
+
+class SpontaneousSkipTest {
+    @Test
+    fun `选择不说后隔一个间隔再考虑 失败后隔半小时`() {
+        val prefs = AgentPrefs()
+        val s = ProactiveState(lastSpokeAtMillis = at(9))
+        val silent = ProactivePolicy.afterSpontaneousSkipped(s, at(10, 30), prefs, failed = false)
+        assertEquals(at(12), ProactivePolicy.nextSpontaneousAt(at(10, 30), silent, prefs, CLOCK))
+        val failed = ProactivePolicy.afterSpontaneousSkipped(s, at(10, 30), prefs, failed = true)
+        assertEquals(at(11), ProactivePolicy.nextSpontaneousAt(at(10, 30), failed, prefs, CLOCK))
+    }
+}
+
+class AgentStoreTest {
+    @Test
+    fun `读写往返 坏文件留备份并报告`() {
+        val dir = kotlin.io.path.createTempDirectory("agent").toFile()
+        val f = java.io.File(dir, "state.json")
+        val store = AgentStore(f)
+        assertEquals(AgentState(), store.read())
+        val s = AgentState(
+            chat = listOf(ChatEntry("1", Role.USER, "你好", at(10))),
+            agenda = listOf(item(AgendaKind.REMINDER, "r", at(11))),
+            facts = listOf(Fact("k", "喜欢茶", FactSource.USER_SAID, at(9))),
+            revision = 7,
+        )
+        store.write(s)
+        assertEquals(s, store.read())
+        f.writeText("{坏的")
+        assertEquals(AgentState(), store.read())
+        assertNotNull(store.lastError)
+        assertTrue(dir.listFiles()!!.any { it.name.startsWith("state.json.broken-") })
+    }
+}

@@ -149,4 +149,6 @@ data class ProactiveState(
     @SerialName("spokenToday") val spokenToday: Int = 0,
     /** 用户点了「安静一会」，到这个时刻前不闲聊、不回访（提醒照常）。 */
     @SerialName("quietUntilMillis") val quietUntilMillis: Long = 0,
+    /** 上次考虑闲聊后选择不说或生成失败，到这个时刻前不再考虑，避免反复调用模型。 */
+    @SerialName("spontaneousNotBeforeMillis") val spontaneousNotBeforeMillis: Long = 0,
 )

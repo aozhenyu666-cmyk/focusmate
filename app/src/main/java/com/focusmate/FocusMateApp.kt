@@ -7,5 +7,6 @@ class FocusMateApp : Application() {
     override fun onCreate() {
         super.onCreate()
         GuardRuntime.install(this)
+        com.focusmate.runtime.AgentRuntime.install(this)
     }
 }

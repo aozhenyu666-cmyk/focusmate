@@ -70,9 +70,20 @@ object GuardRuntime {
 
     fun message(): String? = pendingMessage.also { pendingMessage = null }
 
+    /** 状态迁移监听（伙伴用它在「真的开始/结束」时说话）。监听者出错不影响专注锁。 */
+    private val transitionListeners = java.util.concurrent.CopyOnWriteArrayList<(FocusSession?, FocusSession?) -> Unit>()
+
+    fun addTransitionListener(listener: (FocusSession?, FocusSession?) -> Unit) {
+        transitionListeners += listener
+    }
+
     private fun publish(session: FocusSession?) {
+        val old = current
         current = session
         onSessionChanged?.invoke(session)
+        for (l in transitionListeners) {
+            try { l(old, session) } catch (_: Throwable) { }
+        }
     }
 
     private fun say(text: String) {

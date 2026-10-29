@@ -85,8 +85,8 @@ fun HomeScreen(runtime: GuardRuntime, transientMessage: MutableState<String>) {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("专注伙伴", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text("一期只做一件事：限制真实生效、到点真的恢复。", fontSize = 13.sp)
+            Text("专注", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("限制真实生效、到点自动恢复。也可以直接在「对话」里说「帮我专注 25 分钟」。", fontSize = 13.sp)
 
             transientMessage.value.takeIf { it.isNotBlank() }?.let {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -117,6 +117,17 @@ fun HomeScreen(runtime: GuardRuntime, transientMessage: MutableState<String>) {
                         errorText = null
                         val built = Presets.geminiDock(
                             geminiPackage = geminiPackage,
+                            nowMillis = System.currentTimeMillis(),
+                            enforcement = Enforcement.OVERLAY_PLUS_A11Y,
+                        )
+                        runtime.startSession(built) { errorText = it }
+                        session = runtime.session()
+                    },
+                    onDeep = {
+                        errorText = null
+                        val built = Presets.deepFocus(
+                            selfPackage = context.packageName,
+                            durationMillis = 25L * 60L * 1000L,
                             nowMillis = System.currentTimeMillis(),
                             enforcement = Enforcement.OVERLAY_PLUS_A11Y,
                         )
@@ -171,7 +182,7 @@ private fun PermissionCard(overlayOk: Boolean, a11yOk: Boolean, onOverlay: () ->
 }
 
 @Composable
-private fun StartCard(geminiLabel: String, onDock: () -> Unit, onSingle: () -> Unit) {
+private fun StartCard(geminiLabel: String, onDock: () -> Unit, onDeep: () -> Unit, onSingle: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("和 " + geminiLabel + " 待十分钟", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -182,6 +193,7 @@ private fun StartCard(geminiLabel: String, onDock: () -> Unit, onSingle: () -> U
                 fontSize = 13.sp,
             )
             Button(onClick = onDock, modifier = Modifier.fillMaxWidth()) { Text("进入沉浸舱 · 10 分钟") }
+            Button(onClick = onDeep, modifier = Modifier.fillMaxWidth()) { Text("深度专注 · 25 分钟（只留专注伙伴）") }
             OutlinedButton(onClick = onSingle, modifier = Modifier.fillMaxWidth()) { Text("先用 5 分钟单应用试一次") }
         }
     }

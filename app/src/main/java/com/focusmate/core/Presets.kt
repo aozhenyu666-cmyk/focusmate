@@ -59,6 +59,28 @@ object Presets {
         )
     }
 
+    /**
+     * 深度专注：目标就是本 APP。用户可以继续和伙伴说话，其它应用（通话、微信除外）都被拦。
+     */
+    fun deepFocus(
+        selfPackage: String,
+        durationMillis: Long,
+        nowMillis: Long,
+        enforcement: Enforcement,
+    ): FocusSession = FocusSession(
+        id = UUID.randomUUID().toString(),
+        kind = SessionKind.DEEP_FOCUS,
+        ruleVersion = 1,
+        targetPackage = selfPackage,
+        exceptions = CALL_PACKAGES + WECHAT,
+        startedAtMillis = nowMillis,
+        expiresAtMillis = nowMillis + durationMillis,
+        plannedDurationMillis = durationMillis,
+        state = SessionState.PREPARING,
+        enforcement = enforcement,
+        owned = OwnedRestrictions(),
+    )
+
     fun singleApp(
         targetPackage: String,
         durationMillis: Long,

@@ -116,11 +116,18 @@ object ProactivePolicy {
         val base = maxOf(state.lastSpokeAtMillis, state.lastUserAtMillis).takeIf { it > 0 } ?: nowMillis
         var t = maxOf(base + gap, nowMillis + MIN_LEAD_MILLIS)
         if (state.quietUntilMillis > t) t = state.quietUntilMillis
+        if (state.spontaneousNotBeforeMillis > t) t = state.spontaneousNotBeforeMillis
         if (isQuietHours(t, prefs, time)) t = quietEndsAt(t, prefs, time) + AFTER_QUIET_GRACE_MILLIS
         if (spokenOn(state, time.dayKey(t)) >= prefs.proactivity.dailyCap) {
             t = time.nextAt(time.startOfNextDay(t) - 1, prefs.quietEndMinute) + AFTER_QUIET_GRACE_MILLIS
         }
         return t
+    }
+
+    /** 这次考虑后没说（安静或失败）：至少隔这么久再考虑。 */
+    fun afterSpontaneousSkipped(state: ProactiveState, nowMillis: Long, prefs: AgentPrefs, failed: Boolean): ProactiveState {
+        val wait = if (failed) 30 * 60_000L else prefs.proactivity.minGapMinutes * 60_000L
+        return state.copy(spontaneousNotBeforeMillis = nowMillis + wait)
     }
 
     fun onUserSpoke(state: ProactiveState, nowMillis: Long): ProactiveState =

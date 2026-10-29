@@ -23,9 +23,10 @@ class AgentCore(
         return s to entry
     }
 
-    fun addEvent(state: AgentState, text: String, nowMillis: Long): AgentState =
+    /** tag 用于去重（例如同一次专注的「已开始」只记一次），存放在 agendaId 字段。 */
+    fun addEvent(state: AgentState, text: String, nowMillis: Long, tag: String? = null): AgentState =
         state.copy(
-            chat = capChat(state.chat + ChatEntry(newId(), Role.EVENT, text, nowMillis, Origin.FOCUS_EVENT)),
+            chat = capChat(state.chat + ChatEntry(newId(), Role.EVENT, text, nowMillis, Origin.FOCUS_EVENT, agendaId = tag)),
             revision = state.revision + 1,
         )
 

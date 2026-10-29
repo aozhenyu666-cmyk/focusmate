@@ -19,6 +19,10 @@ class BootReceiver : BroadcastReceiver() {
         ) {
             GuardRuntime.install(context.applicationContext)
             GuardRuntime.checkExpiry()
+            // 开机后系统闹钟全部清空：伙伴重排闹钟，并补处理关机期间到期的提醒。
+            com.focusmate.runtime.AgentRuntime.install(context.applicationContext)
+            com.focusmate.runtime.AgentRuntime.reschedule()
+            com.focusmate.service.AgentWorkService.start(context, com.focusmate.service.AgentWorkService.Job.ProcessDue)
         }
     }
 }

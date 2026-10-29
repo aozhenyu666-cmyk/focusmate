@@ -48,6 +48,9 @@ enum class SessionKind {
 
     /** 沉浸舱：打开 Gemini，约十分钟内只允许 Gemini + 通话 + 微信。 */
     @SerialName("gemini_dock") GEMINI_DOCK,
+
+    /** 深度专注：留在本 APP（可以和伙伴说话），只放行通话与微信。 */
+    @SerialName("deep_focus") DEEP_FOCUS,
 }
 
 @Serializable
