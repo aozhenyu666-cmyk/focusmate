@@ -33,3 +33,18 @@ C:\gradle\gradle-8.11.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug
 - `docs/STATE.md` 当前阶段、版本、已验证/未验证
 - `docs/SOURCES.md` 上游来源与本地实现的对应
 - `docs/ACCEPTANCE.md` 用例、证据、阶段门槛判断
+
+## 上传到 GitHub
+
+仓库：https://github.com/aozhenyu666-cmyk/focusmate （private）
+
+本机到 `github.com:443` 的直连被网络阻断，`git push` 会报
+`Failed to connect to github.com:443`；但 `api.github.com` 正常。
+所以推送走 REST API：`git commit` 照常做，然后用
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\push.ps1
+```
+
+脚本会按 `git ls-files` 上传 blob、建 tree（带 base_tree 做增量）、建 commit、移动 `main` ref，
+效果等价于一次普通推送。网络恢复后可以直接 `git remote set-url` 回 https 用 `git push`。
