@@ -100,7 +100,7 @@
 ## D-10 构建环境（影响可复现性，必须记录）
 
 - 项目真实路径 `C:\focusmate`，工作区内 junction 指过去。
-  原因：AGP 在含非 ASCII 字符（`敖震宇`）的工程路径上直接拒绝，且 Gradle 8.11.1 的
+  原因：AGP 在含非 ASCII 字符（本机 Windows 用户名是中文）的工程路径上直接拒绝，且 Gradle 8.11.1 的
   test worker 在非 ASCII 的 `GRADLE_USER_HOME` 下起不来（`ClassNotFoundException: GradleWorkerMain`）。
 - `GRADLE_USER_HOME` 与 Gradle 发行版都复制到了 ASCII 路径（`C:\gh`、`C:\gradle\gradle-8.11.1`）。
 - `local.properties` 写死 `sdk.dir=C\:\\Android\\Sdk`；环境变量 `ANDROID_HOME` 指向的
