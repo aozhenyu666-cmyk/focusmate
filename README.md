@@ -50,6 +50,8 @@ node scripts\push.mjs
 用全量 tree 而不是 base_tree 增量，是因为增量模式删文件要额外塞 `sha:null` 条目，
 漏了就变成「本地已删、远端还在」。
 
-**代价（必须知道）**：脚本拼出来的 commit SHA 与本地不同。本机网络恢复后已经改为
-用远端的 `origin/main` 作为唯一历史（本地历史被重置到 `origin/main`），此后一律用 `git push`。
-这段说明保留，是因为换一台机器或网络再次抽风时还会遇到同样的问题。
+**代价（必须知道）**：脚本拼出来的 commit SHA 与本地不同，两边历史最初是不相关的两条线。
+本机后来网络恢复（`git push` 已可用），于是用 `git merge origin/main --allow-unrelated-histories`
+把远端那条历史接回本地，冲突只有 `gradlew` 的权限位（内容一致）。
+现在两边同一条历史，日常一律用 `git push`。
+这段说明保留，是因为换机器或网络再次抽风时会遇到同样的问题。
