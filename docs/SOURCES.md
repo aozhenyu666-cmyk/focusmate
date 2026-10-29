@@ -68,3 +68,22 @@
   `_pet-reports/capability-assessment/CAPABILITY_ASSESSMENT.md`（能力考评）。
 - 用途：F-01～F-08 八个缺陷全部转成本项目的设计约束，对应关系见 `DECISIONS.md` D-09。
 - 旧 C3 源码本身未在当前工作区落盘，因此**没有逐行审查**，只依据上述三份记录。不宣称审查过其源码。
+
+
+## S7 同桌与墨灵（用户旧项目，2026-10-29 阅读）
+
+- 同桌：`aozhenyu666-cmyk/test` 分支 `ccr-f3b6cf6b-6gsh3f`，目录 `companion-pet/`。读了 README、`handoff/partner-recovery/OPEN_SOURCE_RESEARCH.md`、
+  CI 工作流 `.github/workflows/companion-pet-android.yml`、`net/` 客户端结构。
+- 墨灵：分支 `deepseek/moling-v13-integration`，目录 `moling/`。读了 `DEEPSEEK-ALL.md`、`V13-PROGRESS.md`。
+- 采用的机制（全部重写，未复制代码）：
+  - 同桌的「主动节奏持久化、成功输出才计数、失败有限退避、不因沉默永久停止」→ `agent/ProactivePolicy.kt`
+  - 同桌的「伙伴上下文设字数上限」→ `agent/Prompt.kt` 的历史与记忆预算
+  - 同桌的「记忆来源区分用户说的/推断的、可删除」→ `Fact.source`、安排页删除
+  - 同桌的「按分支发布预览 APK、固定测试签名可覆盖安装」→ CI 工作流与 D-12
+  - 墨灵的「模型结果带版本，焦点变更时旧结果作废」→ `AgentRuntime.runTurn` 的过时检查
+- 刻意不采用：悬浮桌宠与气泡、看屏幕/截图、联网检索、夜间整理、多模型并行、七脑五手的模块划分。原因见 D-11。
+
+## S3/S4 补充（阶段 2 实际落地）
+
+- dsh-world：持久保存下次联系时间、新约定替换旧约定、失败重试、过期事项不发 → `agent/Agenda.kt`
+- SurfCore：发言要有依据与理由、可以选择不说 → 回访的 `reason` 字段、`stay_silent` 工具、闲聊提示词要求真实切入点

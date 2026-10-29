@@ -1,5 +1,17 @@
 # STATE
 
+## 最新（2026-10-29，分支 `claude/v0.2-agent`）
+
+- 版本 **0.2.0-agent / versionCode 2**：在专注锁之上接入主动 AI 伙伴（D-11）。
+- 构建：GitHub Actions（`.github/workflows/android.yml`）跑单测 + lint + assembleDebug，
+  每个分支推送发布预览包：`https://github.com/aozhenyu666-cmyk/focusmate/releases/download/preview-claude-v0-2-agent/focusmate.apk`
+- 自动测试：107 passed / 0 failed。真机：A-01～A-12、R-1～R-7、B-01～B-15 全部 NOT_RUN。
+- 下一步：用户装预览包、填 Key，按测试单跑真机；按结果修。
+
+---
+
+（以下为阶段 1 记录）
+
 ## 当前阶段/任务
 
 阶段 1（可靠限制与恢复）。

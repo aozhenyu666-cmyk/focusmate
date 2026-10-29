@@ -1,57 +1,58 @@
 # 专注伙伴 FocusMate
 
-一期只做一件事：**专注限制真实生效、到点真的恢复。**
+一个会主动找你、记得你说过的话、能真正锁住手机的 AI 伙伴。
 
-## 现在能做什么
+当前版本：**0.2.0-agent（versionCode 2）**，个人测试预览包，尚未完成真机验收。
 
-- 首页一个按钮「进入沉浸舱 · 10 分钟」：切到 Gemini，接下来十分钟只有 Gemini、通话、微信可用，
-  其它应用被全屏拦截层挡住，到点本地自动解除。规则见 `docs/DECISIONS.md` D-07。
-- 「先用 5 分钟单应用试一次」用于短时长验证同一条限制链路。
+## 安装
 
-## 现在**不**做什么（不要误以为有）
+1. 手机浏览器打开（需要登录能访问本仓库的 GitHub 账号）：
+   **https://github.com/aozhenyu666-cmyk/focusmate/releases/download/preview-claude-v0-2-agent/focusmate.apk**
+2. 之前装过本机编译的 0.1.0：签名不同，先卸载一次（D-12）。之后的预览包都能直接覆盖安装。
+3. 打开后：
+   - **设置 → 模型**：粘贴 DeepSeek API Key，点「测试连接」。
+   - **设置 → 让它能准时找到你**：通知、闹钟和提醒、不限制电池都开成 ✓。vivo / iQOO 再去 i 管家允许自启动和后台高耗电。
+   - **专注页**：要用专注锁时，开悬浮窗和无障碍（开关是灰的：应用详情 → 右上角 ⋮ → 允许受限制的设置）。
 
-- 不锁屏、不挂起应用、不 Force Stop、不用 Shizuku、不用设备所有者。
-- 没有角色人格、没有主动开口、没有记忆与复盘（阶段 2/3）。
-- 不防用户自己去关权限或强行停止本 APP——那属于用户主动解除，应用只如实上报状态。
+## 它能做什么
+
+| 你说 / 你做 | 它做 |
+|---|---|
+| 「半小时后提醒我喝水」「明早 8 点叫我背单词」 | 设提醒。到点准时弹出，**不需要联网**，模型挂了也照样提醒 |
+| 「我去复习高数了」 | 自己约个时间回来问你进度（回访）；「十分钟后再聊」会改期而不是新增 |
+| 「帮我专注 25 分钟写报告」 | 弹出卡片；你点「开始」后手机才会真的锁上，只放行通话和微信 |
+| 专注结束 | 它会来问做得怎么样（复盘）。它只在专注锁真的生效/结束后才这么说 |
+| 「我下周三考六级」 | 记住。「安排」页能看到它记了什么，哪条是你说的、哪条是它推断的，可以删 |
+| 你一段时间没理它 | 按主动程度偶尔找你聊；没有真实话题时它会选择不说；你不回它就放慢 |
+| 通知里 | 直接回复它，或者点「安静 2 小时」 |
+
+专注锁有两种：**沉浸舱**（切到 Gemini，只能和 Gemini 对话）和**深度专注**（留在本 APP，可以继续和伙伴聊）。
+
+## 它不做什么
+
+- 不联网搜索、不看你的屏幕、没有悬浮桌宠。它没看过任何视频或文章，也不会假装看过。
+- 专注锁拦不住你自己去设置里关无障碍、强行停止或卸载（D-06）。
+- 系统「强行停止」后，提醒要等你再打开 APP 才会恢复。
+
+## 规则从哪来
+
+- `docs/DECISIONS.md`：所有规则，D-11 是伙伴的设计，D-13 是之前没答的问题怎么定的
+- `docs/ACCEPTANCE.md`：真机用例（A-、R-、B- 三组）和自动测试
+- `docs/STATE.md`：现在到哪了
+- `docs/SOURCES.md`：参考了哪些项目、拿了什么、没拿什么
+
+## 代码结构
+
+```
+app/src/main/java/com/focusmate/
+  core/      专注锁的纯逻辑（状态机、放行规则、恢复）
+  agent/     伙伴的纯逻辑（安排簿、主动策略、工具校验、上下文、Agent 循环）——都有 JVM 单测
+  runtime/   GuardRuntime（专注锁）与 AgentRuntime（伙伴）两个协调点
+  service/ overlay/ alarm/ notify/ platform/ net/   Android 兑现层
+  ui/        对话 / 专注 / 安排 / 设置
+```
 
 ## 构建
 
-环境已固定（原因见 `docs/DECISIONS.md` D-10：非 ASCII 工程路径会阻断 AGP 与 Gradle test worker）：
-
-```powershell
-$env:JAVA_HOME='C:\Program Files\Microsoft\jdk-21.0.12.101-hotspot'
-$env:GRADLE_USER_HOME='C:\gh'
-$env:TEMP='C:\dsh-tmp'; $env:TMP='C:\dsh-tmp'
-C:\gradle\gradle-8.11.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --no-daemon
-```
-
-产物：`app/build/outputs/apk/debug/app-debug.apk`。
-
-## 文档
-
-- `docs/DECISIONS.md` 已确认规则与未决问题（Q-01～Q-07）
-- `docs/STATE.md` 当前阶段、版本、已验证/未验证
-- `docs/SOURCES.md` 上游来源与本地实现的对应
-- `docs/ACCEPTANCE.md` 用例、证据、阶段门槛判断
-
-## 上传到 GitHub
-
-仓库：https://github.com/aozhenyu666-cmyk/focusmate （private）
-
-本机到 `github.com:443` 的直连被网络阻断，`git push` 会报
-`Failed to connect to github.com:443`；但 `api.github.com` 正常。
-所以推送走 REST API：`git commit` 照常做，然后用
-
-```powershell
-node scripts\push.mjs
-```
-
-脚本按 `git ls-files` 上传 blob、建**全量** tree、建 commit、移动 `main` ref。
-用全量 tree 而不是 base_tree 增量，是因为增量模式删文件要额外塞 `sha:null` 条目，
-漏了就变成「本地已删、远端还在」。
-
-**代价（必须知道）**：脚本拼出来的 commit SHA 与本地不同，两边历史最初是不相关的两条线。
-本机后来网络恢复（`git push` 已可用），于是用 `git merge origin/main --allow-unrelated-histories`
-把远端那条历史接回本地，冲突只有 `gradlew` 的权限位（内容一致）。
-现在两边同一条历史，日常一律用 `git push`。
-这段说明保留，是因为换机器或网络再次抽风时会遇到同样的问题。
+GitHub Actions 每次推送都跑单测、lint、编 APK，并把预览包发布到 `preview-<分支名>`。
+本机构建见 `build.ps1`（环境要求见 D-10）。
