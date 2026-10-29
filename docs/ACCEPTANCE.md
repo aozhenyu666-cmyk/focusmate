@@ -134,3 +134,60 @@
 - 现状：**逻辑层证据齐备，设备层证据为零**。因此阶段 2 **不判通过**，标记为"待真机验收"。
 - 已知缺口（不掩盖，详见 STATE）：专注中禁言已补；更正/忘记已有 UI 入口；
   主动闲聊默认关闭；墓碑非物理删除。
+
+
+---
+
+# 云端复测整改（2026-10-29）
+
+依据《focusmate-云端复测报告》，核对提交 `198885d`。五条问题全部确认成立并已修复。
+
+## 逐项处理
+
+| 编号 | 问题 | 修复 | 反向验证（证明用例能抓住） |
+|---|---|---|---|
+| F-01 | APK 缺 `INTERNET` 权限 | Manifest 补声明 | 临时删掉后 `aapt2 dump permissions` 报 `INTERNET in APK: False`；恢复后为 `True` |
+| F-02 | 遗忘/更正后原句仍从近期对话进入模型输入 | 事实与对话按来源关联：`Utterance.hidden` 墓碑 + `Fact.sourceUtteranceId` + `forgetWithSource/correctWithSource`；`CompanionContext` 组装时过滤 hidden | 临时去掉对话隐藏后 `forgottenFactMustNotLeakThroughDialogue` 失败 |
+| F-03 | 无关回复把所有未来约定标成完成 | 新增 `AWAITING_REPLY` 状态；`closeOnUserReply` 只结算该状态 | 临时改回 `it.open` 后 `unrelatedReplyMustNotCloseFutureAgreement`、`replyClosesOnlyAwaitingItem` 双双失败 |
+| F-04 | 迟到的失败回调复活已取消事项 | `markFailed`/`releaseDelivery` 增加 `issuedVersion` 与「必须仍在 DELIVERING」守卫 | 临时去掉守卫后 `lateNetworkFailureMustNotResurrectCancelledItem`、`lateFailureMustNotOverwriteRescheduledAgreement` 失败 |
+| F-05 | 生成期间记忆变化，旧结果仍可通过闸门 | 引入 `CompanionState.memoryVersion`（只在记忆/配置变化时 +1）；`DeliveryGate.check` 增加记忆版本与「此刻是否仍允许开口」两项 | 临时删掉记忆版本检查后 `factChangeMustInvalidateInFlightProactiveOutput` 失败 |
+
+## 另外两项源码缺口
+
+| 项 | 处理 |
+|---|---|
+| `SettingsTab` 没有闲聊开关 | 已加开关控件 + `setAllowSmallTalk`/`updateSchedule` API；`AWAITING_REPLY` 条目也可取消/改期 |
+| 主动伙伴没有自己的后台/开机唤醒链路 | 新增 `CompanionScheduler`（独立 requestCode 20，与专注到期闹钟互不复用）+ `CompanionWakeReceiver`；`BootReceiver` 在恢复专注后一并恢复伙伴 |
+
+## 本轮自动测试
+
+| 编号 | 覆盖 | 结果 |
+|---|---|---|
+| C-01 | 遗忘后原句不进模型输入 | PASS |
+| C-02 | 更正后旧句不进输入、新内容进输入 | PASS |
+| C-03 | 无关回复不关闭未来约定 | PASS |
+| C-04 | 回应只结算 AWAITING_REPLY | PASS |
+| C-05 | 取消后迟到失败不复活 | PASS |
+| C-06 | 改期后迟到失败不覆盖新时间 | PASS |
+| C-07 | 记忆变化使在途主动结果失效 | PASS |
+| C-08 | 生成结束已进入专注时丢弃 | PASS |
+| C-09 | 状态未变时仍正常发送（防止闸门过严） | PASS |
+
+合计：**133 passed / 0 failed**（原 124 + 新增 9）。
+
+## 仍未获得证据的部分（不得改为 PASS）
+
+- 设备层：UI 点击、覆盖层、到期恢复、TTS 实际发声、通知实际弹出、后台/息屏/省电行为 —— 全部 NOT_RUN。
+- 真实模型调用：本机没有配置 Key。F-01 只证明「APK 具备该权限」，**不证明**请求真的成功。
+  报告要求的两条路径（有效 Key 成功 / 无效 Key 失败）仍需在设备上分开验证。
+- 云端模拟器无 `/dev/kvm` 未能上线，本轮同样没有模拟器证据。
+
+## 用户的手机优先测试顺序（沿用报告建议）
+
+1. 缺权限不能假装开始；授权后切娱乐应用应出现拦截。
+2. 拦截层「回到目标」是否收起；主动结束与自然到期分别测。
+3. 配好模型发一句普通消息，确认真实回复；失败时保留错误提示。
+4. 约定稍后联系 → 再聊一句无关的话 → 检查未来事项是否还在（F-03）。
+5. 记住一条信息 → 更正或忘记 → 继续问相关话题，检查旧信息是否被重新引用（F-02）。
+6. 慢请求期间取消提醒 → 等成功/失败返回 → 确认都不再发出且取消状态不变（F-04）。
+7. 最后测熄屏、省电、进程重建、语音发声与长时间运行。

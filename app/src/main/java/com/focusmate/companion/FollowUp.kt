@@ -20,6 +20,8 @@ data class FollowUp(
     @SerialName("basis") val basis: String,
     /** 依据指向的真实内容；没有依据的事项不允许创建。 */
     @SerialName("evidence") val evidence: String,
+    /** 依据来自哪一句对话。用户忘掉那句话时，这条事项也要作废。 */
+    @SerialName("evidenceUtteranceId") val evidenceUtteranceId: String? = null,
     /** 关联话题，一句话，用于让新旧事项能对上同一个话题。 */
     @SerialName("topic") val topic: String,
     @SerialName("dueAtMillis") val dueAtMillis: Long,
@@ -33,7 +35,10 @@ data class FollowUp(
     /** 去重键：同一话题的约定只保留一条，避免新旧提醒并存。 */
     @SerialName("dedupeKey") val dedupeKey: String,
 ) {
-    val open: Boolean get() = status == FollowUpStatus.PENDING || status == FollowUpStatus.DELIVERING
+    /** 还需要处理的事项（未到期/在投递/等回应）。DONE/CANCELLED/EXPIRED/FAILED 都不算。 */
+    val open: Boolean get() = status == FollowUpStatus.PENDING ||
+        status == FollowUpStatus.DELIVERING ||
+        status == FollowUpStatus.AWAITING_REPLY
 }
 
 @Serializable
@@ -55,7 +60,14 @@ enum class FollowUpStatus {
     /** 正在生成/投递。用于防并发重复投递。 */
     @SerialName("delivering") DELIVERING,
 
-    /** 已经发出并被回应。 */
+    /**
+     * 已经真的说出去了，正在等用户回应。
+     * 与 DONE 分开是因为「说过了」和「这件事了结了」不是一回事：
+     * 只有这一状态才会被"用户回应"结算，未来还没到期的约定不受影响（F-03）。
+     */
+    @SerialName("awaiting_reply") AWAITING_REPLY,
+
+    /** 已经发出并已被回应（或用户明确表示知道了）。 */
     @SerialName("done") DONE,
 
     /** 用户取消或改期后作废。 */

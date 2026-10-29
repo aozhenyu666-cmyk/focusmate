@@ -14,6 +14,15 @@ data class Utterance(
     @SerialName("proactive") val proactive: Boolean = false,
     /** 主动发言时，对应哪条待跟进事项。 */
     @SerialName("followUpId") val followUpId: String? = null,
+    /**
+     * 这句话不能再次进入模型输入（F-02）。
+     *
+     * 为什么必须在句子级别留墓碑：用户说"忘掉我下周三面试"时，
+     * 只把事实标成 RETRACTED 不够——原句还躺在最近对话里，照样会发给模型。
+     * 界面上仍可显示（那是给用户看的），但组装上下文时被过滤掉。
+     */
+    @SerialName("hidden") val hidden: Boolean = false,
+    @SerialName("hiddenReason") val hiddenReason: String? = null,
 ) {
     @Serializable
     enum class Role {

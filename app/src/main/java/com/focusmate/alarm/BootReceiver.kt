@@ -19,6 +19,14 @@ class BootReceiver : BroadcastReceiver() {
         ) {
             GuardRuntime.install(context.applicationContext)
             GuardRuntime.checkExpiry()
+
+            // 主动伙伴也要在这一刻重新排上，否则重启后它就只剩「等用户再次打开」。
+            // 与专注恢复互不影响：这里任何异常都不应该挡住上面的 GuardRuntime。
+            runCatching {
+                val runtime = com.focusmate.companion.CompanionHolder.ensureStarted(context.applicationContext)
+                runtime.tick()
+                com.focusmate.companion.CompanionScheduler.scheduleNext(context.applicationContext, runtime.current())
+            }
         }
     }
 }

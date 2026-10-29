@@ -19,6 +19,12 @@ data class Fact(
     @SerialName("source") val source: FactSource,
     /** 来源引用：哪一句用户话、哪次会话；没有来源就必须写 SYSTEM/INFERRED 并说明。 */
     @SerialName("sourceRef") val sourceRef: String? = null,
+    /**
+     * 这条事实是从哪一句对话推出来的（utterance id）。
+     * 存在的唯一理由：用户要求忘掉/更正时，必须能精确找到**那一句话**，
+     * 把它从模型输入里排除，而不是全局删一个词（F-02）。
+     */
+    @SerialName("sourceUtteranceId") val sourceUtteranceId: String? = null,
     @SerialName("createdAt") val createdAt: Long,
     @SerialName("updatedAt") val updatedAt: Long,
     @SerialName("status") val status: FactStatus = FactStatus.ACTIVE,

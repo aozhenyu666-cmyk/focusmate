@@ -63,6 +63,7 @@ object FactEngine {
         source: FactSource,
         sourceRef: String?,
         nowMillis: Long,
+        sourceUtteranceId: String? = null,
     ): Pair<CompanionState, Fact> {
         val clean = text.trim()
         require(clean.isNotEmpty()) { "事实内容不能为空" }
@@ -75,7 +76,10 @@ object FactEngine {
         }
         if (duplicate != null) {
             val touched = duplicate.copy(recallCount = duplicate.recallCount + 1, updatedAt = nowMillis)
-            return state.copy(facts = state.facts.map { if (it.id == duplicate.id) touched else it }) to touched
+            return state.copy(
+                facts = state.facts.map { if (it.id == duplicate.id) touched else it },
+                memoryVersion = state.memoryVersion + 1,
+            ) to touched
         }
 
         val (importance, reasons) = score(clean, source)
@@ -84,6 +88,7 @@ object FactEngine {
             text = clean,
             source = source,
             sourceRef = sourceRef,
+            sourceUtteranceId = sourceUtteranceId,
             createdAt = nowMillis,
             updatedAt = nowMillis,
             importance = importance,
@@ -101,7 +106,11 @@ object FactEngine {
         } else {
             state.facts
         }
-        return state.copy(facts = kept + fact, epoch = state.epoch + 1) to fact
+        return state.copy(
+            facts = kept + fact,
+            epoch = state.epoch + 1,
+            memoryVersion = state.memoryVersion + 1,
+        ) to fact
     }
 
     /**
@@ -128,7 +137,11 @@ object FactEngine {
         val linked = withNew.facts.map {
             if (it.id == oldFactId) it.copy(supersededBy = fresh.id) else it
         }
-        return withNew.copy(facts = linked, epoch = withNew.epoch + 1) to fresh
+        return withNew.copy(
+            facts = linked,
+            epoch = withNew.epoch + 1,
+            memoryVersion = withNew.memoryVersion + 1,
+        ) to fresh
     }
 
     /** 忘记：转 RETRACTED。保留墓碑，防止后续对话又把同样的内容"推导"回来。 */
@@ -139,7 +152,92 @@ object FactEngine {
                 if (it.id == target.id) it.copy(status = FactStatus.RETRACTED, updatedAt = nowMillis) else it
             },
             epoch = state.epoch + 1,
+            memoryVersion = state.memoryVersion + 1,
         )
+    }
+
+    /**
+     * 按用户那句话做"忘记"（F-02 的关键补齐）。
+     *
+     * 只把事实标 RETRACTED 不够：原句还躺在最近对话里，下次组装上下文照样发给模型。
+     * 所以这里同时做三件事：
+     *   1) 该事实 -> RETRACTED
+     *   2) 产生它的那句对话 -> hidden（界面仍可见，不再进模型输入）
+     *   3) 以那句话为唯一依据的待跟进事项 -> CANCELLED（否则它会继续把那句话往回捞）
+     *
+     * 用户之后自己再说一次同样的内容，会生成新的 utterance 与新的 ACTIVE 事实，
+     * 属于"用户重新提供"，不是"系统复活旧内容"。
+     */
+    fun forgetWithSource(state: CompanionState, factId: String, nowMillis: Long): CompanionState? {
+        val target = state.facts.firstOrNull { it.id == factId && it.status != FactStatus.RETRACTED } ?: return null
+        val utteranceId = target.sourceUtteranceId
+
+        val facts = state.facts.map {
+            if (it.id == target.id) it.copy(status = FactStatus.RETRACTED, updatedAt = nowMillis) else it
+        }
+        val dialogue = if (utteranceId != null) {
+            state.dialogue.map {
+                if (it.id == utteranceId) it.copy(hidden = true, hiddenReason = "user_forget") else it
+            }
+        } else {
+            state.dialogue
+        }
+        val followUps = if (utteranceId != null) {
+            state.followUps.map {
+                if (it.open && it.evidenceUtteranceId == utteranceId) {
+                    it.copy(status = FollowUpStatus.CANCELLED, version = it.version + 1, updatedAt = nowMillis)
+                } else it
+            }
+        } else {
+            state.followUps
+        }
+
+        return state.copy(
+            facts = facts,
+            dialogue = dialogue,
+            followUps = followUps,
+            epoch = state.epoch + 1,
+            memoryVersion = state.memoryVersion + 1,
+        )
+    }
+
+    /**
+     * 更正：同样要处理原句（F-02）。
+     * 旧事实 -> SUPERSEDED；产生它的那句话 -> hidden；新事实 -> ACTIVE。
+     * 这样模型只看到新内容，旧句子不会以"你之前说"的形式再出现。
+     */
+    fun correctWithSource(
+        state: CompanionState,
+        oldFactId: String,
+        newText: String,
+        nowMillis: Long,
+    ): Pair<CompanionState, Fact>? {
+        val old = state.facts.firstOrNull { it.id == oldFactId && it.status == FactStatus.ACTIVE } ?: return null
+        val utteranceId = old.sourceUtteranceId
+
+        val withOldRetired = state.copy(
+            facts = state.facts.map {
+                if (it.id == oldFactId) it.copy(status = FactStatus.SUPERSEDED, updatedAt = nowMillis) else it
+            },
+            dialogue = if (utteranceId != null) {
+                state.dialogue.map {
+                    if (it.id == utteranceId) it.copy(hidden = true, hiddenReason = "user_correction") else it
+                }
+            } else {
+                state.dialogue
+            },
+        )
+        val (withNew, fresh) = add(
+            state = withOldRetired,
+            text = newText,
+            source = FactSource.USER_STATED,
+            sourceRef = "更正自 " + old.id,
+            nowMillis = nowMillis,
+        )
+        val linked = withNew.facts.map {
+            if (it.id == oldFactId) it.copy(supersededBy = fresh.id) else it
+        }
+        return withNew.copy(facts = linked, epoch = withNew.epoch + 1) to fresh
     }
 
     /** 被提到 = 复习：只刷新 recallCount/updatedAt，不改内容。 */
@@ -156,7 +254,7 @@ object FactEngine {
                 f.copy(recallCount = f.recallCount + 1, updatedAt = nowMillis)
             } else f
         }
-        return if (touched > 0) state.copy(facts = next) else state
+        return if (touched > 0) state.copy(facts = next, memoryVersion = state.memoryVersion + 1) else state
     }
 
     /** 中文双字 + 英文词袋，与上游 textTokens 同思路，用于召回与复习。 */

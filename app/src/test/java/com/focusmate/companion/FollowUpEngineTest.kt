@@ -114,13 +114,17 @@ class FollowUpEngineTest {
     }
 
     @Test
-    fun `版本一致的正常投递会被记成完成 并累加今日次数`() {
+    fun `版本一致的正常投递记为已说出 等用户回应`() {
         val (s1, item) = FollowUpEngine.userAgreement(fresh(), "复盘", "依据", t0, t0)
         val (s2, delivering) = FollowUpEngine.beginDelivery(s1, item.id, t0)!!
         val s3 = FollowUpEngine.markSent(s2, item.id, t0 + 1000, CompanionConfig(), { 0 }, 0.5, delivering.version)!!
-        assertEquals(FollowUpStatus.DONE, s3.followUps.first { it.id == item.id }.status)
+        // 说出去 ≠ 这件事了结：进入 AWAITING_REPLY，只有用户回应才变 DONE（F-03 的语义基础）。
+        assertEquals(FollowUpStatus.AWAITING_REPLY, s3.followUps.first { it.id == item.id }.status)
         assertEquals(1, s3.countToday)
         assertEquals(t0 + 1000, s3.lastRunAtMillis)
+        // 用户回应后被结算成 DONE
+        val closed = DeliveryGate.closeOnUserReply(s3, t0 + 2000)
+        assertEquals(FollowUpStatus.DONE, closed.followUps.first { it.id == item.id }.status)
     }
 
     // ---------------------------------------------------------------- 失败与过期

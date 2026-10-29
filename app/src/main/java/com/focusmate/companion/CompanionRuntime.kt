@@ -80,7 +80,8 @@ class CompanionRuntime(
      */
     fun correctFact(factId: String, newText: String): Boolean {
         if (newText.isBlank()) return false
-        val result = FactEngine.correct(state, factId, newText.trim(), now()) ?: return false
+        // 走带来源的版本：旧句子也要一并退出模型输入（F-02）。
+        val result = FactEngine.correctWithSource(state, factId, newText.trim(), now()) ?: return false
         state = result.first
         persist(); publish()
         return true
@@ -88,8 +89,38 @@ class CompanionRuntime(
 
     /** 忘记一条事实（界面按钮用）。保留墓碑，不物理删除（见 DECISIONS D-15）。 */
     fun forgetFact(factId: String): Boolean {
-        val next = FactEngine.forget(state, factId, now()) ?: return false
+        // 走带来源的版本：原句 + 以它为唯一依据的事项一起停用（F-02）。
+        val next = FactEngine.forgetWithSource(state, factId, now()) ?: return false
         state = next
+        persist(); publish()
+        return true
+    }
+
+    /** 开关主动闲聊。UI 必须有这个入口，否则验收用例 J 无法由用户自行触发。 */
+    fun setAllowSmallTalk(enabled: Boolean): Boolean {
+        state = state.copy(
+            config = state.config.copy(allowSmallTalk = enabled),
+            memoryVersion = state.memoryVersion + 1,
+        )
+        persist(); publish()
+        return true
+    }
+
+    /** 调整频率与免打扰（保守默认允许被用户改动，改动会留痕）。 */
+    fun updateSchedule(
+        gapMinMinutes: Int? = null,
+        gapMaxMinutes: Int? = null,
+        dailyMax: Int? = null,
+        quietStartMinute: Int? = null,
+        quietEndMinute: Int? = null,
+    ): Boolean {
+        var c = state.config
+        gapMinMinutes?.let { c = c.copy(gapMinMillis = it.coerceAtLeast(5) * 60_000L) }
+        gapMaxMinutes?.let { c = c.copy(gapMaxMillis = it.coerceAtLeast(5) * 60_000L) }
+        dailyMax?.let { c = c.copy(dailyMax = it.coerceIn(0, 24)) }
+        quietStartMinute?.let { c = c.copy(quietStartMinute = it.coerceIn(0, 1439)) }
+        quietEndMinute?.let { c = c.copy(quietEndMinute = it.coerceIn(0, 1439)) }
+        state = state.copy(config = c, memoryVersion = state.memoryVersion + 1)
         persist(); publish()
         return true
     }
@@ -172,6 +203,8 @@ class CompanionRuntime(
             dialogue = (state.dialogue + userUtterance).takeLast(80),
             lastUserSpeakAtMillis = t,
             epoch = state.epoch + 1,
+            // 又说了新话 = 记忆变了：正在生成的那条主动发言必须失效（F-05）。
+            memoryVersion = state.memoryVersion + 1,
         )
 
         // 2) 结构化意图（改期/取消/改锁定请求）
@@ -204,6 +237,7 @@ class CompanionRuntime(
                     evidence = "用户说「" + intent.evidence + "」",
                     dueAtMillis = due,
                     nowMillis = t,
+                    evidenceUtteranceId = userUtterance.id,
                 )
                 state = next
                 val reply = "行，" + clockText(due) + " 再聊这个。"
@@ -217,7 +251,14 @@ class CompanionRuntime(
 
         // 3) 普通对话：把用户的话记成事实（来源=用户说的），并做复习
         if (shouldRecordAsFact(trimmed)) {
-            val (next, _) = FactEngine.add(state, trimmed, FactSource.USER_STATED, "utterance:" + userUtterance.id, t)
+            val (next, _) = FactEngine.add(
+                state = state,
+                text = trimmed,
+                source = FactSource.USER_STATED,
+                sourceRef = "utterance:" + userUtterance.id,
+                nowMillis = t,
+                sourceUtteranceId = userUtterance.id,
+            )
             state = FactEngine.touch(next, trimmed, t)
         }
         // 用户回应之后，同话题的主动事项视为已处理，避免回完又冒一句。
@@ -226,13 +267,13 @@ class CompanionRuntime(
         // 4) 生成回复
         val followUpForContext = state.followUps.firstOrNull { it.open }
         val bundle = CompanionContext.build(persona, state, t, trimmed, followUpForContext)
-        val issuedEpoch = state.epoch
+        val issuedMemoryVersion = bundle.memoryVersion
         scope.launch {
             when (val result = modelClient.complete(bundle.systemPrompt, bundle.userPrompt)) {
                 is ModelResult.Ok -> {
                     val reply = result.text.take(300)
-                    // 生成期间用户可能又说了话：epoch 变了就重来一次上下文，不硬塞旧回复。
-                    if (state.epoch != issuedEpoch) {
+                    // 生成期间又说了话/又记了新事实：这份回复的上下文已经过期，丢弃。
+                    if (state.memoryVersion != issuedMemoryVersion) {
                         onProblem?.invoke("对话在你回复期间有更新，这一条已丢弃")
                         return@launch
                     }
@@ -311,6 +352,8 @@ class CompanionRuntime(
             hasOpenFollowUp = FollowUpEngine.hasOpen(state),
             inFocusSession = focusActive(),
         )
+        // 每次 tick 之后都重排闹钟：事项可能刚被改期/取消，闹钟必须跟着变。
+        CompanionScheduler.scheduleNext(context, state)
         if (decision is SchedulePolicy.Decision.Run) {
             val due = FollowUpEngine.dueNow(state, t)
             if (due != null && delivering == null) {
@@ -333,69 +376,85 @@ class CompanionRuntime(
         val begun = FollowUpEngine.beginDelivery(state, item.id, t) ?: return
         state = begun.first
         val deliveringItem = begun.second
+        // 发起时的两个版本快照：事项版本 + 记忆版本。任何一个在生成期间变了，结果都作废。
         val issuedVersion = deliveringItem.version
+        val issuedMemoryVersion = state.memoryVersion
         persist(); publish()
 
         delivering = scope.launch {
             try {
-                // 生成前校验：可能刚被改期/取消
-                when (val pre = DeliveryGate.check(item.id, issuedVersion, state, now())) {
-                    is DeliveryGate.Verdict.Drop -> {
-                        // 丢弃的原因通常是"用户已改期/取消"：那不是失败，不能再记成 FAILED
-                        // （记成失败会让用户看到一条莫名其妙的失败，而且会覆盖掉刚设的新约定）。
-                        recordTrace(trace(item.id, issuedVersion).also { it.discard(pre.reason) })
-                        state = FollowUpEngine.releaseDelivery(state, item.id, now()) ?: state
-                        persist(); publish()
-                        return@launch
-                    }
-                    DeliveryGate.Verdict.Send -> Unit
+                // ---- 生成前校验
+                val preCheck = DeliveryGate.check(
+                    followUpId = item.id,
+                    issuedVersion = issuedVersion,
+                    issuedMemoryVersion = issuedMemoryVersion,
+                    state = state,
+                    nowMillis = now(),
+                    nowAllowsSpeaking = stillAllowedToSpeak(),
+                )
+                if (preCheck is DeliveryGate.Verdict.Drop) {
+                    // 丢弃通常意味着"用户已改期/取消/改了记忆"：那不是失败，
+                    // 不能再记成 FAILED（会让用户看到莫名其妙的失败，还会盖掉刚设的新约定）。
+                    recordTrace(trace(item.id, issuedVersion).also { it.discard(preCheck.reason) })
+                    state = FollowUpEngine.releaseDelivery(state, item.id, now(), issuedVersion) ?: state
+                    persist(); publish()
+                    return@launch
                 }
 
                 val bundle = CompanionContext.build(persona, state, now(), item.topic, deliveringItem)
-                when (val result = modelClient.complete(bundle.systemPrompt, bundle.userPrompt)) {
+                val result = modelClient.complete(bundle.systemPrompt, bundle.userPrompt)
+
+                // ---- 输出前再校验一次（生成期间可能发生一切）
+                val postCheck = DeliveryGate.check(
+                    followUpId = item.id,
+                    issuedVersion = issuedVersion,
+                    issuedMemoryVersion = bundle.memoryVersion,
+                    state = state,
+                    nowMillis = now(),
+                    nowAllowsSpeaking = stillAllowedToSpeak(),
+                )
+                if (postCheck is DeliveryGate.Verdict.Drop) {
+                    recordTrace(trace(item.id, issuedVersion).also { it.discard(postCheck.reason) })
+                    if (result is ModelResult.Failed) {
+                        onProblem?.invoke("主动发言失败：" + result.reason)
+                    }
+                    state = FollowUpEngine.releaseDelivery(state, item.id, now(), issuedVersion) ?: state
+                    persist(); publish()
+                    return@launch
+                }
+
+                when (result) {
                     is ModelResult.Ok -> {
-                        // 输出前再校验一次：生成期间的改期/取消必须让这条结果作废。
-                        when (val post = DeliveryGate.check(item.id, issuedVersion, state, now())) {
-                            is DeliveryGate.Verdict.Drop -> {
-                                recordTrace(trace(item.id, issuedVersion).also { it.discard(post.reason) })
-                                state = FollowUpEngine.releaseDelivery(state, item.id, now()) ?: state
-                                persist(); publish()
-                            }
-                            DeliveryGate.Verdict.Send -> {
-                                val text = result.text.take(300)
-                                val tr = trace(item.id, issuedVersion)
-                                tr.generated(now(), text)
-                                appendCompanion(text, now(), proactive = true, followUpId = item.id)
-                                recordTrace(tr)
-                                val sent = FollowUpEngine.markSent(
-                                    state = state,
-                                    id = item.id,
-                                    nowMillis = now(),
-                                    config = state.config,
-                                    minuteOfDay = ::minuteOfDay,
-                                    roll = 0.5,
-                                    issuedVersion = issuedVersion,
-                                )
-                                if (sent == null) {
-                                    onProblem?.invoke("事项版本已变，本次发言未记录为完成")
-                                } else {
-                                    state = sent
-                                }
-                                persist(); publish()
-                                speakAsync(text)
-                            }
+                        val text = result.text.take(300)
+                        val tr = trace(item.id, issuedVersion)
+                        tr.generated(now(), text)
+                        appendCompanion(text, now(), proactive = true, followUpId = item.id)
+                        recordTrace(tr)
+                        // 说出去之后是 AWAITING_REPLY，不是 DONE：等用户回应才算这件事了结（F-03）。
+                        val sent = FollowUpEngine.markSent(
+                            state = state,
+                            id = item.id,
+                            nowMillis = now(),
+                            config = state.config,
+                            minuteOfDay = ::minuteOfDay,
+                            roll = 0.5,
+                            issuedVersion = issuedVersion,
+                        )
+                        if (sent == null) {
+                            onProblem?.invoke("事项版本已变，本次发言未记录为已发出")
+                        } else {
+                            state = sent
                         }
+                        persist(); publish()
+                        speakAsync(text)
                     }
                     ModelResult.Unconfigured -> {
-                        // 没有模型：不是故障，但也不能假装说了。退回一句固定说明并记失败。
                         onProblem?.invoke("未配置模型，主动发言跳过")
-                        state = FollowUpEngine.markFailed(state, item.id, now(), state.config, "未配置模型") ?: state
-                        persist(); publish()
+                        markFailedSafely(item.id, issuedVersion, "未配置模型")
                     }
                     is ModelResult.Failed -> {
                         onProblem?.invoke("主动发言失败：" + result.reason)
-                        state = FollowUpEngine.markFailed(state, item.id, now(), state.config, result.reason) ?: state
-                        persist(); publish()
+                        markFailedSafely(item.id, issuedVersion, result.reason)
                     }
                 }
             } finally {
@@ -403,6 +462,36 @@ class CompanionRuntime(
             }
         }
     }
+
+    /** 失败记账统一入口：带发起版本，晚到的失败不会复活已取消/已改期的事项（F-04）。 */
+    private fun markFailedSafely(id: String, issuedVersion: Int, reason: String) {
+        val next = FollowUpEngine.markFailed(
+            state = state,
+            id = id,
+            nowMillis = now(),
+            config = state.config,
+            reason = reason,
+            issuedVersion = issuedVersion,
+        ) ?: state
+        state = next
+        persist(); publish()
+    }
+
+    /**
+     * 此刻是否仍允许开口。用于输出前的最后一次检查：
+     * 生成开始时允许、结束时已经进入专注/免打扰/关掉开关，就不该再播出去（F-05 后半）。
+     */
+    private fun stillAllowedToSpeak(): Boolean = SchedulePolicy.evaluate(
+        nowMillis = now(),
+        config = state.config,
+        minuteOfDay = ::minuteOfDay,
+        lastRunAtMillis = state.lastRunAtMillis,
+        countToday = state.countToday,
+        nextDueAtMillis = 0L, // 到点与否不参与：这里问的是"规则允不允许"
+        lastUserSpeakAtMillis = state.lastUserSpeakAtMillis,
+        hasOpenFollowUp = true,
+        inFocusSession = focusActive(),
+    ) is SchedulePolicy.Decision.Run
 
     /** 主动闲聊：只能从真实旧话题/事实里生成候选，没有依据就不说（DECISIONS D-05 默认关闭）。 */
     private fun maybeSmallTalk(t: Long) {

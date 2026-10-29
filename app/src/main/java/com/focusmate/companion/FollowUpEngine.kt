@@ -29,6 +29,7 @@ object FollowUpEngine {
         evidence: String,
         dueAtMillis: Long,
         nowMillis: Long,
+        evidenceUtteranceId: String? = null,
     ): Pair<CompanionState, FollowUp> {
         require(topic.isNotBlank()) { "话题不能为空" }
         require(evidence.isNotBlank()) { "必须留下依据：用哪句话定的" }
@@ -43,6 +44,7 @@ object FollowUpEngine {
             source = FollowUpSource.USER_AGREEMENT,
             basis = "你说过要在之后接着聊这个",
             evidence = evidence,
+            evidenceUtteranceId = evidenceUtteranceId,
             topic = topic,
             dueAtMillis = dueAtMillis,
             createdAt = nowMillis,
@@ -64,6 +66,7 @@ object FollowUpEngine {
         evidence: String,
         dueAtMillis: Long,
         nowMillis: Long,
+        evidenceUtteranceId: String? = null,
     ): Pair<CompanionState, FollowUp> {
         require(topic.isNotBlank())
         require(evidence.isNotBlank())
@@ -78,6 +81,7 @@ object FollowUpEngine {
             source = FollowUpSource.UNFINISHED_TOPIC,
             basis = "上次这件事没说到底",
             evidence = evidence,
+            evidenceUtteranceId = evidenceUtteranceId,
             topic = topic,
             dueAtMillis = dueAtMillis,
             createdAt = nowMillis,
@@ -180,8 +184,10 @@ object FollowUpEngine {
         val item = state.followUps.firstOrNull { it.id == id } ?: return null
         // 版本不符 = 期间被改期/取消/更正，这条结果作废。
         if (item.version != issuedVersion) return null
+        // 已经说出去但还没等到回应：标 AWAITING_REPLY 而不是 DONE，
+        // 只有这一状态会被"用户回应"结算（F-03）。
         val nextItems = state.followUps.map {
-            if (it.id == id) it.copy(status = FollowUpStatus.DONE, updatedAt = nowMillis) else it
+            if (it.id == id) it.copy(status = FollowUpStatus.AWAITING_REPLY, updatedAt = nowMillis) else it
         }
         val count = state.countToday + 1
         return state.copy(
@@ -210,8 +216,17 @@ object FollowUpEngine {
         nowMillis: Long,
         config: CompanionConfig,
         reason: String,
+        issuedVersion: Int? = null,
     ): CompanionState? {
         val item = state.followUps.firstOrNull { it.id == id } ?: return null
+
+        // F-04：失败回调必须能被丢弃。三种情况一律不动：
+        // 1) 已是终态（取消/过期/完成/失败）——迟到的失败不能复活它；
+        // 2) 不在 DELIVERING——说明这一轮已经被别人接手或已经结算；
+        // 3) 版本对不上——期间被改期或换了新约定，旧的失败不该覆盖新的。
+        if (item.status != FollowUpStatus.DELIVERING) return state
+        if (issuedVersion != null && item.version != issuedVersion) return state
+
         val exhausted = item.attempts >= config.maxAttempts
         val updated = if (exhausted) {
             item.copy(status = FollowUpStatus.FAILED, updatedAt = nowMillis)
@@ -251,9 +266,15 @@ object FollowUpEngine {
      * 与 markFailed 的区别：这不是"说失败了"，而是"这一轮作废"，
      * 所以只把仍然停在 DELIVERING 的事项还原成 PENDING，不动 attempts、不动其它状态。
      */
-    fun releaseDelivery(state: CompanionState, id: String, nowMillis: Long): CompanionState? {
+    fun releaseDelivery(
+        state: CompanionState,
+        id: String,
+        nowMillis: Long,
+        issuedVersion: Int? = null,
+    ): CompanionState? {
         val item = state.followUps.firstOrNull { it.id == id } ?: return null
         if (item.status != FollowUpStatus.DELIVERING) return state
+        if (issuedVersion != null && item.version != issuedVersion) return state
         return state.copy(
             followUps = state.followUps.map {
                 if (it.id == id) it.copy(status = FollowUpStatus.PENDING, updatedAt = nowMillis) else it

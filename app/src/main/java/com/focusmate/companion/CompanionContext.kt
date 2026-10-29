@@ -18,6 +18,11 @@ object CompanionContext {
         /** 这次用了哪些事实（便于事后追责：模型说错话时能查到它看到的原文）。 */
         val usedFactIds: List<String>,
         val followUpId: String?,
+        /**
+         * 组装这份上下文时的记忆版本。输出前拿它和目标状态再比一次，
+         * 不一致说明"生成期间记忆变了"，旧结果必须丢弃（F-05）。
+         */
+        val memoryVersion: Long = 0L,
     )
 
     /**
@@ -32,7 +37,9 @@ object CompanionContext {
         maxChars: Int = DEFAULT_MAX_CHARS,
     ): Bundle {
         val facts = FactEngine.recall(state, query + " " + (trigger?.topic ?: ""), limit = 8)
-        val recent = state.dialogue.takeLast(12)
+        // 被用户要求忘掉/更正过的句子不进模型输入（F-02）。
+        // 界面上仍然显示，那是给人看的；"别再发给模型"和"从界面消失"是两件事。
+        val recent = state.dialogue.filter { !it.hidden }.takeLast(12)
 
         val sb = StringBuilder()
         sb.appendLine("# 你是谁")
@@ -84,7 +91,7 @@ object CompanionContext {
             "对方说：" + query + "\n直接回应，两句话以内。"
         }
 
-        return Bundle(system, user, facts.map { it.id }, trigger?.id)
+        return Bundle(system, user, facts.map { it.id }, trigger?.id, state.memoryVersion)
     }
 
     private fun timeText(millis: Long): String {

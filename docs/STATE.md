@@ -26,7 +26,8 @@
 | lint | **0 errors / 7 warnings** | `app/build/reports/lint-results-debug.txt` |
 | debug APK | 23,202,250 bytes | `app/build/outputs/apk/debug/` |
 | 一键构建脚本 | `build.ps1`（含结果汇总与 APK 哈希） | 已跑通 |
-| 远端仓库 | https://github.com/aozhenyu666-cmyk/focusmate （public） | `git push` 成功，`main` = 1d82a9d 之后 |
+| 远端仓库 | https://github.com/aozhenyu666-cmyk/focusmate （public） | 本地与远端同为 `997724c` |
+| 网络 | `git push` 间歇性失败（TCP 握手不完成），非配置问题 | 实测见 `docs/NETWORK.md` |
 
 单测分布：
 - `FocusGuardTest` 18：状态迁移、拦截/收起、微信与通话放行、系统界面中性、到期本地解除、
@@ -98,11 +99,11 @@ app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
 | 项 | 结果 | 证据 |
 |---|---|---|
 | 编译 | 通过 | `:app:compileDebugKotlin` |
-| JVM 单测 | **124 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
+| JVM 单测 | **133 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
 | lint | **0 errors / 10 warnings** | `app/build/reports/lint-results-debug.txt` |
-| debug APK | 23,830,234 bytes | SHA256 `569E8745134A90DD8A2DC3DC5B8A31EDB9BB70FADC94F7413CBE8D7F39BDE779` |
+| debug APK | 23,834,266 bytes | SHA256 `9CE055B07D700B16B7BBEB075EA966369633D09A3751E2F41217B64B1010F3B7` |
 
-阶段 2 新增的 72 项单测分布：
+阶段 2 新增的 81 项单测分布（原 72 + 云端复测整改 9）：
 - `FactEngineTest` 16：三种来源可区分、模型推测被压权、去重窗口、复习、更正退出上下文、
   遗忘留墓碑、墓碑不被重新激活、召回排序与上限、分词。
 - `FollowUpEngineTest` 17：约定创建、同话题替换、依据必填、人格兴趣去重、改期、
@@ -149,3 +150,24 @@ app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
    专注期间返回 `Wait`。这是执行指令任务 2.3 的明确要求，当前缺失。
 3. **补"更正/忘记"的 UI 入口**（记忆页每条加两个按钮），把引擎能力变成可用行为。
 4. 接上真机后按 `docs/ACCEPTANCE.md` 阶段 2 表 A–J 逐条跑。
+
+
+---
+
+# 云端复测整改（2026-10-29）
+
+| 编号 | 问题 | 状态 |
+|---|---|---|
+| F-01 | APK 缺 INTERNET | 已修，`aapt2 dump permissions` 确认合并后 APK 含该权限 |
+| F-02 | 遗忘/更正后原句仍进模型输入 | 已修，`Utterance.hidden` + `forgetWithSource`/`correctWithSource` |
+| F-03 | 无关回复清空未来约定 | 已修，新增 `AWAITING_REPLY`，只结算该状态 |
+| F-04 | 迟到失败复活已取消事项 | 已修，`markFailed` 带 `issuedVersion` + DELIVERING 守卫 |
+| F-05 | 生成期记忆变化仍会发出 | 已修，`memoryVersion` + 输出前复算是否允许开口 |
+| 缺口1 | 闲聊开关无 UI | 已加开关与 `setAllowSmallTalk` |
+| 缺口2 | 伙伴无自己的唤醒链路 | 已加 `CompanionScheduler` + `CompanionWakeReceiver`，BootReceiver 一并恢复 |
+
+新增 `app/src/test/java/com/focusmate/companion/CloudRegressionTest.kt`（9 项）。
+每条修复都用「临时改回旧行为 -> 用例必须失败 -> 改回 -> 用例通过」验证过，
+证明这些用例不是空断言。记录见 ACCEPTANCE「反向验证」列。
+
+**仍待设备验证**：F-01 只证明权限存在，不证明请求成功；UI/通知/TTS/后台/真实模型全部 NOT_RUN。

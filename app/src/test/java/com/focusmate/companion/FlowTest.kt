@@ -62,20 +62,24 @@ class FlowTest {
         val (s2, delivering) = FollowUpEngine.beginDelivery(state, item.id, t0)!!
         state = s2
         state = FollowUpEngine.cancel(state, item.id, t0 + 500)!!
-        val verdict = DeliveryGate.check(item.id, delivering.version, state, t0 + 1000)
+        val verdict = DeliveryGate.check(item.id, delivering.version, state.memoryVersion, state, t0 + 1000)
         assertTrue(verdict is DeliveryGate.Verdict.Drop)
-        assertTrue((verdict as DeliveryGate.Verdict.Drop).reason.contains("改动") || verdict.reason.contains("取消"))
+        // 取消同时改了事项版本与记忆版本，两个原因都算对；这里只要求"确实被拦下"。
+        assertTrue((verdict as DeliveryGate.Verdict.Drop).reason.isNotBlank())
     }
 
     /** D：用户回应之后，主动事项视为已处理，不会重复提醒。 */
     @Test
-    fun `D 用户回应后关闭待跟进 不重复提醒`() {
+    fun `D 用户回应后只结算等他回应的那条`() {
         var state = CompanionState(dayKey = "2026-10-29", config = cfg)
         val (s1, item) = FollowUpEngine.userAgreement(state, "复盘", "依据", t0, t0)
-        state = DeliveryGate.closeOnUserReply(s1, t0 + 1000)
+        val (s2, delivering) = FollowUpEngine.beginDelivery(s1, item.id, t0)!!
+        state = FollowUpEngine.markSent(s2, item.id, t0 + 500, cfg, { 0 }, 0.5, delivering.version)!!
+        assertEquals(FollowUpStatus.AWAITING_REPLY, state.followUps.first { it.id == item.id }.status)
+
+        state = DeliveryGate.closeOnUserReply(state, t0 + 1000)
         assertEquals(FollowUpStatus.DONE, state.followUps.first { it.id == item.id }.status)
         assertTrue(!FollowUpEngine.hasOpen(state))
-        // 再 tick 也不会有 due 事项
         assertNull(FollowUpEngine.dueNow(state, t0 + 10_000))
     }
 
@@ -144,7 +148,7 @@ class FlowTest {
         val (s1, item) = FollowUpEngine.userAgreement(state, "复盘", "依据", t0, t0)
         state = s1
         val (s2, delivering) = FollowUpEngine.beginDelivery(state, item.id, t0)!!
-        val verdict = DeliveryGate.check(item.id, delivering.version, s2, t0 + DeliveryGate.MAX_LATE_MILLIS + 1)
+        val verdict = DeliveryGate.check(item.id, delivering.version, s2.memoryVersion, s2, t0 + DeliveryGate.MAX_LATE_MILLIS + 1)
         assertTrue(verdict is DeliveryGate.Verdict.Drop)
         assertTrue((verdict as DeliveryGate.Verdict.Drop).reason.contains("迟到"))
     }
@@ -154,7 +158,7 @@ class FlowTest {
     fun `窗口内版本一致才允许发送`() {
         val (s1, item) = FollowUpEngine.userAgreement(CompanionState(dayKey = "2026-10-29"), "复盘", "依据", t0, t0)
         val (s2, delivering) = FollowUpEngine.beginDelivery(s1, item.id, t0)!!
-        val verdict = DeliveryGate.check(item.id, delivering.version, s2, t0 + 1000)
+        val verdict = DeliveryGate.check(item.id, delivering.version, s2.memoryVersion, s2, t0 + 1000)
         assertEquals(DeliveryGate.Verdict.Send, verdict)
     }
 

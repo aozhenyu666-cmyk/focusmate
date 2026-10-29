@@ -33,6 +33,13 @@ data class CompanionState(
     @SerialName("personaVersion") val personaVersion: Int = 1,
     /** 这条状态属于哪个会话（用于判断是否被别的实例改写）。 */
     @SerialName("epoch") val epoch: Long = 0L,
+    /**
+     * 记忆/规则的版本。只在这些东西变化时 +1：事实增删改、对话追加、配置变更、人格变更。
+     *
+     * 为什么不复用 epoch：epoch 连"标记投递中"这种记账也会变，
+     * 拿它做输出校验会把正常投递判成过期（F-05 的修法必须用更窄的版本）。
+     */
+    @SerialName("memoryVersion") val memoryVersion: Long = 0L,
 )
 
 interface CompanionStore {

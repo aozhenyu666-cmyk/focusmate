@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 模型调用需要联网；缺这条时配好 Key 也发不出请求（云端复测 F-01）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -73,6 +76,15 @@
         <receiver
             android:name=".alarm.ExpiryReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".companion.CompanionWakeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.focusmate.action.COMPANION_CHECK" />
+                <action android:name="com.focusmate.action.COMPANION_RESCHEDULE" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".alarm.BootReceiver"

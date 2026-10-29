@@ -115,7 +115,7 @@ fun CompanionScreen() {
                 onCancel = { id -> CompanionHolder.runtime()?.cancelFollowUp(id) },
                 onReschedule = { id, due -> CompanionHolder.runtime()?.rescheduleFollowUp(id, due) },
             )
-            else -> SettingsTab()
+            else -> SettingsTab(state)
         }
     }
 }
@@ -264,7 +264,7 @@ private fun FollowUpsTab(
                         Text("到：" + fmt.format(Date(f.dueAtMillis)), fontSize = 11.sp)
                         Text("依据：" + f.evidence, fontSize = 11.sp)
                         if (f.attempts > 0) Text("已尝试 " + f.attempts + " 次", fontSize = 10.sp)
-                        if (f.status == FollowUpStatus.PENDING) {
+                        if (f.status == FollowUpStatus.PENDING || f.status == FollowUpStatus.AWAITING_REPLY) {
                             Row {
                                 TextButton(onClick = {
                                     onReschedule(f.id, System.currentTimeMillis() + 10 * 60_000L)
@@ -279,13 +279,15 @@ private fun FollowUpsTab(
     }
 }
 @Composable
-private fun SettingsTab() {
+private fun SettingsTab(current: CompanionState?) {
     val context = LocalContext.current
     var endpoint by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
     var key by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf<String?>(null) }
     val snapshot = remember { ModelSettings.load(context) }
+    // 配置会被开关改动：直接读上层传下来的当前状态，避免读到过期快照。
+    val liveState = current
 
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("模型", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -302,13 +304,27 @@ private fun SettingsTab() {
         saved?.let { Text(it, fontSize = 12.sp) }
 
         Text("主动交流规则（当前为保守默认，等待你确认）", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-        val cfg = snapshot.config
-        val state = CompanionHolder.runtime()?.current()
+        val state = liveState
         val c = state?.config
         if (c != null) {
             Text("两次之间至少 " + (c.gapMinMillis / 60000) + " 分钟；每天最多 " + c.dailyMax + " 次", fontSize = 12.sp)
             Text("免打扰：" + clockText(c.quietStartMinute) + " 至 " + clockText(c.quietEndMinute), fontSize = 12.sp)
-            Text(if (c.allowSmallTalk) "允许没有约定也主动闲聊" else "只按约定和未说完的事开口（不主动闲聊）", fontSize = 12.sp)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(
+                    if (c.allowSmallTalk) "允许没有约定也主动闲聊" else "只按约定和未说完的事开口（不主动闲聊）",
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(onClick = {
+                    CompanionHolder.runtime()?.setAllowSmallTalk(!c.allowSmallTalk)
+                }) { Text(if (c.allowSmallTalk) "关掉" else "打开") }
+            }
+            if (c.allowSmallTalk) {
+                Text(
+                    "打开后会从已有记忆里找话题，但只在有真实依据时才说；没有依据仍然不说话。",
+                    fontSize = 11.sp,
+                )
+            }
             Text("失败重试 " + (c.retryMillis / 60000) + " 分钟，最多 " + c.maxAttempts + " 次", fontSize = 12.sp)
         }
         Text(
@@ -322,6 +338,7 @@ private fun SettingsTab() {
 private fun statusLabel(s: FollowUpStatus): String = when (s) {
     FollowUpStatus.PENDING -> "等着"
     FollowUpStatus.DELIVERING -> "正在说"
+    FollowUpStatus.AWAITING_REPLY -> "已说出，等你回应"
     FollowUpStatus.DONE -> "已经说过"
     FollowUpStatus.CANCELLED -> "已取消"
     FollowUpStatus.EXPIRED -> "已过期"

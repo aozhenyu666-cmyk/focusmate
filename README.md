@@ -51,6 +51,7 @@ C:\gradle\gradle-8.11.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug
 - `docs/STATE.md` 当前阶段、版本、已验证/未验证
 - `docs/SOURCES.md` 上游来源与本地实现的对应
 - `docs/ACCEPTANCE.md` 用例、证据、阶段门槛判断
+- `docs/NETWORK.md` 本机 `git push` 不稳定的实测诊断与应对
 
 ## 上传到 GitHub
 
