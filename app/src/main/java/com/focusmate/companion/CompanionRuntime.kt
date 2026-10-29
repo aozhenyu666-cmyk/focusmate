@@ -58,6 +58,25 @@ class CompanionRuntime(
      */
     var focusActive: () -> Boolean = { false }
 
+    /**
+     * 出站审查的统一入口。返回 null 表示整句都不该发。
+     * 已知密钥从 ModelSettings 取当前配置的那一个——我们本来就知道它是什么，
+     * 所以用精确匹配，不靠正则在裸串里瞎找（那会大面积误伤）。
+     */
+    private fun guardOutbound(text: String): String? {
+        if (OutboundGuard.shouldDropEntirely(text)) return null
+        val secrets = runCatching { ModelSettings.load(context).config.apiKey }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { listOf(it) }
+            ?: emptyList()
+        val result = OutboundGuard.inspect(text, secrets)
+        if (result.redacted) {
+            onProblem?.invoke("出站审查改写了这一句：" + result.reasons.joinToString("；"))
+        }
+        return result.text
+    }
+
     fun load() {
         val loaded = store.read()
         if (loaded != null) {
@@ -205,6 +224,8 @@ class CompanionRuntime(
         )
         state = state.copy(
             dialogue = (state.dialogue + userUtterance).takeLast(80),
+            // 用户又开口了：上次收尾的软冷却立刻失效（结束不是把人关掉）。
+            closure = ClosurePolicy.reopen(state.closure, t),
             lastUserSpeakAtMillis = t,
             epoch = state.epoch + 1,
             // 又说了新话 = 记忆变了：正在生成的那条主动发言必须失效（F-05）。
@@ -268,20 +289,48 @@ class CompanionRuntime(
         // 用户回应之后，同话题的主动事项视为已处理，避免回完又冒一句。
         state = DeliveryGate.closeOnUserReply(state, t)
 
-        // 4) 生成回复
+        // 4) 收尾判断（只做建议，不硬静音）
+        val assessment = ClosureEngine.assess(
+            recent = state.dialogue.takeLast(20),
+            pendingThoughts = state.followUps.count { it.open },
+            nowMillis = t,
+        )
+        // 对方明确在提问/求助且还没答时，不允许收尾——先回答（上游的 hard gate）。
+        val closureBlocked = assessment.awaitingTheirAnswer
+
+        // 5) 生成回复
         val followUpForContext = state.followUps.firstOrNull { it.open }
-        val bundle = CompanionContext.build(persona, state, t, trimmed, followUpForContext)
+        val bundle = CompanionContext.build(persona, state, t, trimmed, followUpForContext, assessment)
         val issuedMemoryVersion = bundle.memoryVersion
         scope.launch {
             when (val result = modelClient.complete(bundle.systemPrompt, bundle.userPrompt)) {
                 is ModelResult.Ok -> {
-                    val reply = result.text.take(300)
                     // 生成期间又说了话/又记了新事实：这份回复的上下文已经过期，丢弃。
                     if (state.memoryVersion != issuedMemoryVersion) {
                         onProblem?.invoke("对话在你回复期间有更新，这一条已丢弃")
                         return@launch
                     }
+                    // 出站审查：Key、本机路径、凭据赋值都不能说出去。
+                    val guarded = guardOutbound(result.text.take(300))
+                    if (guarded == null) {
+                        onProblem?.invoke("这一句触发了出站审查，已拦下未发送")
+                        return@launch
+                    }
+                    val reply = guarded
                     appendCompanion(reply, now(), proactive = false, followUpId = null)
+                    // 判断为可以收尾时留一条记录：收在哪、下次怎么接。
+                    if (assessment.verdict == ClosureEngine.Verdict.CLOSE && !closureBlocked) {
+                        state = state.copy(
+                            closure = ClosurePolicy.make(
+                                assessment = assessment,
+                                summary = reply,
+                                nextOpening = "",
+                                nowMillis = now(),
+                            ),
+                            epoch = state.epoch + 1,
+                            memoryVersion = state.memoryVersion + 1,
+                        )
+                    }
                     onReply(reply)
                     persist(); publish()
                     speakAsync(reply)

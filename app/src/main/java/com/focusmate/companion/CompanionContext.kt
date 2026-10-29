@@ -34,6 +34,7 @@ object CompanionContext {
         nowMillis: Long,
         query: String,
         trigger: FollowUp?,
+        assessment: ClosureEngine.Assessment? = null,
         maxChars: Int = DEFAULT_MAX_CHARS,
     ): Bundle {
         val facts = FactEngine.recall(state, query + " " + (trigger?.topic ?: ""), limit = 8)
@@ -82,6 +83,22 @@ object CompanionContext {
                 sb.appendLine("## 这次为什么要开口")
                 sb.appendLine("- 这个话题：" + it.topic)
                 sb.appendLine("- 依据：" + it.evidence)
+                sb.appendLine()
+            }
+        }
+
+        // 收尾判断：只给判断与依据，不替模型决定（来自 SurfCore 的设计）。
+        assessment?.let {
+            val block = ClosureEngine.promptBlock(it)
+            if (block.isNotBlank()) { sb.appendLine(block) }
+        }
+
+        // 上次收尾记录：让「结束」不是「断掉」——下次知道收在哪、可以怎么接。
+        state.closure?.let { c ->
+            if (c.at > 0L && !c.inCooldown(nowMillis)) {
+                sb.appendLine("## 上次这段怎么收的")
+                if (c.summary.isNotBlank()) sb.appendLine("- 收在「" + c.summary.take(60) + "」")
+                if (c.nextOpening.isNotBlank()) sb.appendLine("- 下次可以这样接：「" + c.nextOpening + "」")
                 sb.appendLine()
             }
         }

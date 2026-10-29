@@ -36,6 +36,12 @@ object WakePlanner {
             .minOfOrNull { it.dueAtMillis }
             ?: return null
 
+        // 收尾软冷却：只压主动开口，用户主动找他不受影响（那条路径不经过这里）。
+        if (ClosurePolicy.suppressesProactive(state.closure, nowMillis)) {
+            val until = state.closure?.cooldownUntil ?: 0L
+            return if (until > nowMillis) until else nowMillis + SchedulePolicy.FOCUS_RECHECK
+        }
+
         if (inFocusSession) return nowMillis + SchedulePolicy.FOCUS_RECHECK
 
         if (SchedulePolicy.inQuietHours(minuteOfDay(nowMillis), config)) {

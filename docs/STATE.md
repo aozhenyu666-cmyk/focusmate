@@ -99,7 +99,7 @@ app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
 | 项 | 结果 | 证据 |
 |---|---|---|
 | 编译 | 通过 | `:app:compileDebugKotlin` |
-| JVM 单测 | **144 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
+| JVM 单测 | **164 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
 | lint | **0 errors / 10 warnings** | `app/build/reports/lint-results-debug.txt` |
 | debug APK | 23,945,338 bytes | SHA256 `88F33E9E05E2B23F1B59533C41E33552D2C4104B21F048F1696A614534FA1C74` |
 
@@ -194,3 +194,36 @@ app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
 2. 无障碍刚连上时 `rootInActiveWindow` 常为 null，原来一次读不到就判 A11Y_UNAVAILABLE。
    修法：最多重试 4 次、每次 500ms，仍读不到才如实失败。
 这两条只有本机模拟器的观察，尚未在用户手机上复验。
+
+
+---
+
+# SurfCore 第二批借鉴（2026-10-29）
+
+新增两块能力，均由 `Mieksido/surfcore` @ `d7f6b33` 重写而来（未复制代码）：
+
+| 模块 | 补的缺口 | 测试 |
+|---|---|---|
+| `ClosureEngine.kt` | 「每句必回」：用户说「嗯」「晚安」也照样生成回复 | `ClosedLoopTest` 中 11 项 |
+| `ClosureRecord.kt` | 收尾不留痕：结束=断掉，下次只能重新开场 | 同上（含软冷却只压主动开口） |
+| `OutboundGuard.kt` | **出站零审查**：模型可能把 API Key / 本机路径说出去 | `ClosedLoopTest` 中 7 项 |
+
+合计 **164 passed / 0 failed**（原 144 + 新增 20）。
+lint 0 errors / 10 warnings。APK 23,945,338 bytes，含 INTERNET。
+
+反向验证：把收尾判断改成永远 CONTINUE → `对方道别时允许收尾` 失败；
+把出站审查改成空操作 → 4 项审查用例失败（已知密钥、本机路径、unix 路径、凭据赋值）。
+
+## 仍未验证
+
+收尾判断与出站审查都只有 JVM 证据：真实对话里模型是否照着「可以收尾」的建议做、
+审查打码后用户体验如何，都还没在设备/真实模型上看过。标 NOT_RUN。
+
+## 过程中修掉的自身错误（记下来避免重犯）
+
+1. 出站审查的正则里 `BACKSLASH` 常量只写了一个字符，导致 Windows 路径匹配不到。
+   正确写法是 Kotlin 源码 `"\\\\"`（运行时两个字符 = 正则里一个反斜杠）。
+2. 凭据正则一开始把「是/为」当强赋值，把「我不记得密码是什么了」打码了，已拆强弱两档。
+3. 消息分类只认「吗/呢/什么」结尾，漏了「这个怎么用」「你去吗」，已补句尾语气词剥离与疑问副词。
+4. 三次读测试结果读到上一次的旧 XML，导致误报 4 个失败。已改用
+   `:app:testDebugUnitTest --rerun-tasks` 强制重跑再读。

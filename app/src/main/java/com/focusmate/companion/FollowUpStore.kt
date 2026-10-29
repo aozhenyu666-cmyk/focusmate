@@ -40,6 +40,9 @@ data class CompanionState(
      * 拿它做输出校验会把正常投递判成过期（F-05 的修法必须用更窄的版本）。
      */
     @SerialName("memoryVersion") val memoryVersion: Long = 0L,
+
+    /** 上一次对话收尾的记录（含下次怎么接）。没有就是没收过尾。 */
+    @SerialName("closure") val closure: ClosureRecord? = null,
 )
 
 interface CompanionStore {

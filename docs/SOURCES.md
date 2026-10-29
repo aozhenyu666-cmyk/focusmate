@@ -110,3 +110,53 @@
 - DetoxDroid：GPL-3.0（阶段 1 已记录，仍未复制代码）。
 - dsh-world、SurfCore：MIT（已读自有核心）。本项目**重写**而非复制，故无传染问题；
   若后续确实逐行复制，须按其条款保留声明。
+
+
+---
+
+# 阶段 2 补充：SurfCore 第二批借鉴（2026-10-29）
+
+重新通读了 `Mieksido/surfcore` @ `d7f6b33d57b1667508c48206cbcc455815d6d336`（471 个文件），
+只挑**能补上我们真实缺口**的两块移植，其余明确不碰。
+
+## 借鉴了：对话收尾判断
+
+| 上游 | 本地 | 保留的行为 |
+|---|---|---|
+| `src/conversation-closure.js` `assessConversationClosure` | `companion/ClosureEngine.kt` | 五类消息分类（道别/提问/请求/附和/有内容）；四项信号（我的继续意愿、对方的继续意愿、话题闭环、节奏疲劳）加权；**未答提问时硬阻止收尾** |
+| 同文件 `closeGate` | `ClosureEngine.assess` 的 `awaitingTheirAnswer` | 把「不想回」和「逃避」分开：对方在问就必须先答 |
+| 同文件 `makeClosureRecord` / `closureSuppressesWake` | `companion/ClosureRecord.kt` | 收尾留痕（summary + nextOpening）；软冷却只压**主动开口**，不压用户主动找他 |
+| 同文件 `closurePromptBlock` | `ClosureEngine.promptBlock` | 只给「判断 + 依据」，不替模型决定；不把内部枚举名写进提示词 |
+
+**解决的我们自己的问题**：之前 `userSays` 是无条件生成回复——用户说「嗯」「晚安」也照样回一句，
+长期会变成"每句必回"的机械感。现在有了判断建议，并且收尾会落一条记录，
+下次开口时能看到「上次收在这」和「下次可以这样接」，不再是从零开场。
+
+## 借鉴了：出站内容审查
+
+| 上游 | 本地 | 保留的行为 |
+|---|---|---|
+| `src/sensitive.js` `SENSITIVE_RE` | `companion/OutboundGuard.kt` | 拦本机路径与凭据赋值；**关键词必须带赋值形态**才判，避免误伤正常对话 |
+
+**我们按 Android 场景做了两处收紧**（上游注释里也提醒过同类坑）：
+1. 上游把「是/为」也算强赋值；我们拆成强弱两档——强形态（`=` / `:`）后面放宽，
+   弱形态（「是/为」）后面必须是像令牌的拉丁串。原因是实测「我不记得密码是什么了」
+   被打成了「[凭据已隐藏]」，正常句子被弄坏。
+2. 已知密钥用**精确匹配**（Key 本来就在我们手里），不往正则里加 32 位十六进制——
+   上游明确写过这会把正常表情 md5 / 图片名整条拦掉。
+
+**解决的我们自己的问题**：上下文里有 API Key（存 shared_prefs），模型被追问完全可能把它、
+把 `C:\Users\...` 这类本机路径吐出来。之前**没有任何出站检查**。
+
+## 明确不借鉴（附理由）
+
+| 上游能力 | 为什么不要 |
+|---|---|
+| QQ / B站 / 贴吧平台适配（`src/bridge.js` 850KB、`tools/commands/*`） | 执行指令一期禁止联网采集、B站、QQ |
+| 语音包与安装器（`SUBSYSTEM-VOICE`、`dist/installer`） | 我们只用系统 TTS；引入会带来 FFmpeg/模型文件依赖 |
+| 角色切换与快照（`character-persona.js` 的 snapshot/restore/archive） | 一期只有一个角色，多角色是阶段 3 之后的事 |
+| `drives` 驱动向量、`goals` 目标假设、`observations` 账本 | 这些依赖"角色在别的平台有活动"才有素材；我们没有，硬引入会变成空转 |
+| 10GB append-only 全量记忆卡 | 我们的事实量级是几百条，SQLite/JSON 足够；引入 JSONL 扫描是过度设计 |
+| `history-catchup` 上线补历史 | 那是为 IM 掉线设计的。Android 侧没有"离线期间的消息"，无对应场景 |
+| `greeting-schedule` 早安定时 | 它的核心价值是"补发窗口 + 跨模式发送方式"，我们的 `WakePlanner` 已覆盖迟到处理 |
+| `role-card` 的模式标记解析 | 我们只有一个注入模式，没有一代/二代仿真之分 |
