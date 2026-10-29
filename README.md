@@ -54,7 +54,7 @@ C:\gradle\gradle-8.11.1\bin\gradle.bat :app:testDebugUnitTest :app:assembleDebug
 
 ## 上传到 GitHub
 
-仓库：https://github.com/aozhenyu666-cmyk/focusmate （private）
+仓库：https://github.com/aozhenyu666-cmyk/focusmate
 
 本机到 `github.com:443` 的直连被网络阻断，`git push` 会报
 `Failed to connect to github.com:443`；但 `api.github.com` 正常。

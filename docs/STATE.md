@@ -26,7 +26,7 @@
 | lint | **0 errors / 7 warnings** | `app/build/reports/lint-results-debug.txt` |
 | debug APK | 23,202,250 bytes | `app/build/outputs/apk/debug/` |
 | 一键构建脚本 | `build.ps1`（含结果汇总与 APK 哈希） | 已跑通 |
-| 远端仓库 | https://github.com/aozhenyu666-cmyk/focusmate （private） | `git push` 成功，`main` = 1d82a9d 之后 |
+| 远端仓库 | https://github.com/aozhenyu666-cmyk/focusmate （public） | `git push` 成功，`main` = 1d82a9d 之后 |
 
 单测分布：
 - `FocusGuardTest` 18：状态迁移、拦截/收起、微信与通话放行、系统界面中性、到期本地解除、
