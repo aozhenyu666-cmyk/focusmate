@@ -1,5 +1,7 @@
 # STATE
 
+> 阶段 2 已落代码并通过本地验证；真机验收 A–J 全部 **NOT_RUN**（`adb devices` 为空）。
+
 ## 当前阶段/任务
 
 阶段 1（可靠限制与恢复）。
@@ -50,3 +52,100 @@
 1. 用户回答 Q-03（微信放行粒度）与 Q-04（到期是否直接放开），这两条决定 D-07 的验收口径。
 2. 接上真机后按 `docs/ACCEPTANCE.md` A-01～A-12 逐条跑并回填。
 3. Q-01/Q-02 有答复后调整 D-04/D-06 并重跑受影响用例。
+
+
+---
+
+# 阶段 2 状态（2026-10-29 更新）
+
+## 当前阶段/任务
+
+阶段 2（依据 dsh-world 与 SurfCore 实现主动伙伴）。
+- 任务 2.1 人格与最小记忆 ✅ 代码完成，JVM 验证通过
+- 任务 2.2 主动事项与调度 ✅ 代码完成，JVM 验证通过
+- 任务 2.3 输出与回应 ✅ 代码完成，JVM 验证通过（TTS 只做了接口与失败退回，未真机听）
+- 任务 2.4 验收与回归 ⛔ 真机全部 **NOT_RUN**
+
+## 本轮新增文件
+
+```
+app/src/main/java/com/focusmate/companion/
+  Persona.kt              稳定人格（临时值，DECISIONS Q-06 未确认）
+  Fact.kt                 事实模型：三种来源 + 三种状态 + 只读 label()
+  Dialogue.kt             有界对话日志
+  FollowUp.kt             事项模型：来源/依据/话题/到期/状态/版本
+  CompanionConfig.kt      主动规则（保守默认）
+  SchedulePolicy.kt       判定与排程（纯函数）
+  FollowUpEngine.kt       创建/替换/改期/取消/投递/失败/过期
+  FactEngine.kt           评分/去重/复习/更正/遗忘/召回
+  CompanionContext.kt     唯一上下文入口
+  IntentParser.kt         改期/取消/改锁定的确定性解析
+  ModelClient.kt          模型端口 + 脱敏描述
+  OpenAiCompatibleClient.kt  /chat/completions 最小客户端
+  DeliveryLog.kt          DeliveryTrace：生成/展示/TTS 五步留痕
+  DeliveryGate.kt         生成前后版本校验 + 迟到上限
+  SpeechOutput.kt         系统 TTS，单段串行，失败只影响语音
+  CompanionRuntime.kt     唯一协调点（对话、tick、投递、串行化）
+  CompanionService.kt     前台服务 60 秒 tick
+  CompanionHolder.kt      单例，避免两个运行时写同一份状态
+  ModelSettings.kt        API Key 本地存放（不入库、不入日志）
+app/src/main/java/com/focusmate/ui/CompanionScreen.kt  对话/记忆/事项/设置四个页签
+app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
+```
+
+## 已验证（本地）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 编译 | 通过 | `:app:compileDebugKotlin` |
+| JVM 单测 | **124 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
+| lint | **0 errors / 10 warnings** | `app/build/reports/lint-results-debug.txt` |
+| debug APK | 23,830,234 bytes | SHA256 `569E8745134A90DD8A2DC3DC5B8A31EDB9BB70FADC94F7413CBE8D7F39BDE779` |
+
+阶段 2 新增的 72 项单测分布：
+- `FactEngineTest` 16：三种来源可区分、模型推测被压权、去重窗口、复习、更正退出上下文、
+  遗忘留墓碑、墓碑不被重新激活、召回排序与上限、分词。
+- `FollowUpEngineTest` 17：约定创建、同话题替换、依据必填、人格兴趣去重、改期、
+  取消、投递串行（DELIVERING 不可再取）、版本不符丢弃、正常完成、失败退避、
+  超限转 FAILED、过期清理、dueNow 选择。
+- `SchedulePolicyTest` 17：跨零点免打扰、起止相同不启用、非跨零点区间、判定顺序
+  （disabled/quiet/daily-max/waiting/no-topic/user-active/run）、首次排程、
+  停机只补一枪、落在免打扰被推后、达到上限推到次日。
+- `IntentParserTest` 10：十分钟/半小时/两小时/等下再聊、取消、改锁定被识别为拒绝、
+  普通聊天不产生意图、依据必填、中文数字 1..99。
+- `FlowTest` 12：A 到点开口、B 改期后旧事项失效且接续同话题、C 生成期取消结果被拦、
+  D 回应后关闭待跟进、E 更正后上下文无旧事实、F 失败退避不轰炸、G 序列化往返、
+  I 与专注会话互不引用、J 闲聊必须有依据、迟到丢弃、窗口内允许、上下文含人格与依据。
+
+## 尚未通过 / 尚未测试
+
+**真机 A–J 全部 NOT_RUN**（无设备）。未验证的具体行为：
+- 前台服务能否在息屏/省电下持续 tick，迟到多久；
+- 通知能否实际弹出（Android 13+ 需要 POST_NOTIFICATIONS 授权，代码里申请了权限但未在真机授权过）；
+- TTS 是否真的发声、失败是否真的退回文字（代码路径已写，未听）；
+- 模型真实调用（未配置 Key，且 Q-06/Q-07 未确认服务商）；
+- 进程重建后事项与事实是否原样存在；
+- 与阶段 1 的共存：专注进行中时伙伴是否会插话（当前 `SchedulePolicy` 没有"专注中禁言"的输入，
+  **这是一个已知缺口**，见下方"下一步"第 2 条）。
+
+## 已知缺口（不掩盖）
+
+1. **专注中可能插话**：`SchedulePolicy.evaluate` 没有接收"是否在专注"的入参，
+   所以专注进行中伙伴仍可能主动开口。执行指令 §7 任务 2.3 要求按确认规则处理"专注中发言"，
+   而该规则本身还没被用户确认（Q-05）。当前如实记录为缺口，不假装已处理。
+2. **主动闲聊默认关闭**：`allowSmallTalk = false`，所以 A–J 里的 J 用例
+   （非显式闹钟触发的开场）在默认配置下不会发生，只能在设置里打开后验证。
+3. **墓碑不是物理删除**（D-15）。
+4. **UI 里没有"更正/忘记"按钮**：`FactEngine.correct/forget` 已有且被单测覆盖，
+   但界面只读，改正是通过对话触发（说"改成……"目前不会被自动识别为更正指令）。
+   **这是本轮真实缺口**：任务 2.1 的验收项"更正事实后，后续回答使用新信息"
+   目前只有引擎层证据，没有 UI 入口。
+
+## 下一步
+
+1. 等 Q-08（文字+TTS 是否可接受）、Q-09（是否要主动闲聊）、Q-05（频率/免打扰）
+   与 Q-06（角色称呼/风格/模型服务商）的答复，再调整默认值与人格。
+2. **补"专注中禁言"**：把 `GuardRuntime.session()` 的进行中状态接进 `SchedulePolicy`，
+   专注期间返回 `Wait`。这是执行指令任务 2.3 的明确要求，当前缺失。
+3. **补"更正/忘记"的 UI 入口**（记忆页每条加两个按钮），把引擎能力变成可用行为。
+4. 接上真机后按 `docs/ACCEPTANCE.md` 阶段 2 表 A–J 逐条跑。

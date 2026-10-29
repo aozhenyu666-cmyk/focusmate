@@ -6,4 +6,6 @@
     <string name="notif_channel_guard">专注守护</string>
     <string name="notif_guard_title">专注进行中</string>
     <string name="notif_action_end">紧急结束</string>
+    <string name="notif_channel_partner">伙伴来信</string>
+    <string name="notif_partner_title">伙伴</string>
 </resources>

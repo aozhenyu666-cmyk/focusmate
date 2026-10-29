@@ -61,6 +61,15 @@
                 android:value="focus_session_guard" />
         </service>
 
+        <service
+            android:name=".companion.CompanionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="companion_scheduler" />
+        </service>
+
         <receiver
             android:name=".alarm.ExpiryReceiver"
             android:exported="false" />

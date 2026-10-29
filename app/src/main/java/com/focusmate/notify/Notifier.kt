@@ -31,8 +31,12 @@ class Notifier(private val context: Context) {
             setShowBadge(false)
         }
         val result = NotificationChannel(CH_RESULT, "专注结果", NotificationManager.IMPORTANCE_DEFAULT)
+        val partner = NotificationChannel(CH_PARTNER, "伙伴来信", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "伙伴主动发来的话"
+        }
         manager.createNotificationChannel(guard)
         manager.createNotificationChannel(result)
+        manager.createNotificationChannel(partner)
     }
 
     fun guardRunning(session: FocusSession) {
@@ -69,6 +73,29 @@ class Notifier(private val context: Context) {
         manager.notify(ID_RESULT, n)
     }
 
+    /**
+     * 主动发言的通知。文案里只放正文，不做"已送达/已读"的暗示。
+     * 返回是否发布成功，调用方据此记录"文字展示"这一步。
+     */
+    fun companionSays(text: String): Boolean = try {
+        val open = PendingIntent.getActivity(
+            context, 3, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = Notification.Builder(context, CH_PARTNER)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle("伙伴")
+            .setContentText(text.take(60))
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        manager.notify(ID_PARTNER, n)
+        true
+    } catch (t: Throwable) {
+        false
+    }
+
     fun failure(title: String, body: String) {
         val n = Notification.Builder(context, CH_RESULT)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
@@ -89,7 +116,9 @@ class Notifier(private val context: Context) {
     companion object {
         const val CH_GUARD = "focus_guard"
         const val CH_RESULT = "focus_result"
+        const val CH_PARTNER = "companion_message"
         const val ID_GUARD = 1001
         const val ID_RESULT = 1002
+        const val ID_PARTNER = 1003
     }
 }
