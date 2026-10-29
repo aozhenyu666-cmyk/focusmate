@@ -75,7 +75,18 @@ object FactEngine {
                 nowMillis - it.createdAt <= 2L * SchedulePolicy.DAY
         }
         if (duplicate != null) {
-            val touched = duplicate.copy(recallCount = duplicate.recallCount + 1, updatedAt = nowMillis)
+            // R-02：同一句话在遗忘前说过多次时，必须把**每一次**的来源都记下来。
+            // 否则遗忘只隐藏第一句，第二句仍会在对话里发给模型。
+            val mergedSources = buildList {
+                duplicate.sourceUtteranceId?.let { add(it) }
+                addAll(duplicate.sourceUtteranceIds)
+                if (sourceUtteranceId != null && sourceUtteranceId !in this) add(sourceUtteranceId)
+            }.distinct()
+            val touched = duplicate.copy(
+                recallCount = duplicate.recallCount + 1,
+                updatedAt = nowMillis,
+                sourceUtteranceIds = mergedSources,
+            )
             return state.copy(
                 facts = state.facts.map { if (it.id == duplicate.id) touched else it },
                 memoryVersion = state.memoryVersion + 1,
@@ -89,6 +100,7 @@ object FactEngine {
             source = source,
             sourceRef = sourceRef,
             sourceUtteranceId = sourceUtteranceId,
+            sourceUtteranceIds = sourceUtteranceId?.let { listOf(it) } ?: emptyList(),
             createdAt = nowMillis,
             updatedAt = nowMillis,
             importance = importance,
@@ -170,26 +182,33 @@ object FactEngine {
      */
     fun forgetWithSource(state: CompanionState, factId: String, nowMillis: Long): CompanionState? {
         val target = state.facts.firstOrNull { it.id == factId && it.status != FactStatus.RETRACTED } ?: return null
-        val utteranceId = target.sourceUtteranceId
+
+        // 这个事实关联的**全部**原句（R-02：可能不止一句）。
+        val utteranceIds = buildList {
+            target.sourceUtteranceId?.let { add(it) }
+            addAll(target.sourceUtteranceIds)
+        }.distinct().toSet()
 
         val facts = state.facts.map {
             if (it.id == target.id) it.copy(status = FactStatus.RETRACTED, updatedAt = nowMillis) else it
         }
-        val dialogue = if (utteranceId != null) {
-            state.dialogue.map {
-                if (it.id == utteranceId) it.copy(hidden = true, hiddenReason = "user_forget") else it
-            }
-        } else {
+        val dialogue = if (utteranceIds.isEmpty()) {
             state.dialogue
+        } else {
+            state.dialogue.map {
+                if (it.id in utteranceIds) it.copy(hidden = true, hiddenReason = "user_forget") else it
+            }
         }
-        val followUps = if (utteranceId != null) {
+        // R-03：以这些句子为唯一依据的待跟进事项一并作废，
+        // 否则它下次开口时会把"要聊的那句话"又从 evidence 里捞回来。
+        val followUps = if (utteranceIds.isEmpty()) {
+            state.followUps
+        } else {
             state.followUps.map {
-                if (it.open && it.evidenceUtteranceId == utteranceId) {
+                if (it.open && it.evidenceUtteranceId in utteranceIds) {
                     it.copy(status = FollowUpStatus.CANCELLED, version = it.version + 1, updatedAt = nowMillis)
                 } else it
             }
-        } else {
-            state.followUps
         }
 
         return state.copy(
@@ -213,19 +232,37 @@ object FactEngine {
         nowMillis: Long,
     ): Pair<CompanionState, Fact>? {
         val old = state.facts.firstOrNull { it.id == oldFactId && it.status == FactStatus.ACTIVE } ?: return null
-        val utteranceId = old.sourceUtteranceId
+
+        // 旧事实关联的全部原句（R-02）。
+        val utteranceIds = buildList {
+            old.sourceUtteranceId?.let { add(it) }
+            addAll(old.sourceUtteranceIds)
+        }.distinct().toSet()
+
+        // R-03：更正时，以旧句为依据的事项必须一起处理，不能只改事实表和对话表。
+        // 这些事项的 evidence 就是被更正掉的那句话，留着它下次开口会说错。
+        val followUps = if (utteranceIds.isEmpty()) {
+            state.followUps
+        } else {
+            state.followUps.map {
+                if (it.open && it.evidenceUtteranceId in utteranceIds) {
+                    it.copy(status = FollowUpStatus.CANCELLED, version = it.version + 1, updatedAt = nowMillis)
+                } else it
+            }
+        }
 
         val withOldRetired = state.copy(
             facts = state.facts.map {
                 if (it.id == oldFactId) it.copy(status = FactStatus.SUPERSEDED, updatedAt = nowMillis) else it
             },
-            dialogue = if (utteranceId != null) {
-                state.dialogue.map {
-                    if (it.id == utteranceId) it.copy(hidden = true, hiddenReason = "user_correction") else it
-                }
-            } else {
+            dialogue = if (utteranceIds.isEmpty()) {
                 state.dialogue
+            } else {
+                state.dialogue.map {
+                    if (it.id in utteranceIds) it.copy(hidden = true, hiddenReason = "user_correction") else it
+                }
             },
+            followUps = followUps,
         )
         val (withNew, fresh) = add(
             state = withOldRetired,

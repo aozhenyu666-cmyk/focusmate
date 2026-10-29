@@ -25,7 +25,19 @@ class CompanionWakeReceiver : BroadcastReceiver() {
         // 先确保运行时起来（会顺带拉前台服务），再让它按磁盘状态重新判定。
         val runtime = CompanionHolder.ensureStarted(app)
         runtime.tick()
-        CompanionScheduler.scheduleNext(app, runtime.current())
+        val s = runtime.current()
+        CompanionScheduler.scheduleAt(
+            app,
+            WakePlanner.plan(
+                state = s,
+                nowMillis = System.currentTimeMillis(),
+                minuteOfDay = { millis ->
+                    val c = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+                    c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
+                },
+                inFocusSession = runtime.focusActive(),
+            ),
+        )
     }
 
     companion object {

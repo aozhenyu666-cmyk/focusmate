@@ -68,6 +68,15 @@ object GuardRuntime {
 
     fun session(): FocusSession? = current
 
+    /** 清掉上一次的失败记录，供 UI 的"知道了"用。 */
+    fun clearFailureRecord() {
+        val s = current ?: return
+        if (s.failure == null) return
+        val cleared = s.copy(failure = null)
+        persist(cleared)
+        publish(cleared)
+    }
+
     fun message(): String? = pendingMessage.also { pendingMessage = null }
 
     private fun publish(session: FocusSession?) {
@@ -127,7 +136,7 @@ object GuardRuntime {
                 expiry.schedule(plan.session.expiresAtMillis, plan.session.id)
                 GuardForegroundService.start(appContext)
                 notifier.guardRunning(plan.session)
-                main.postDelayed({ verifyTargetStillForeground(plan.session.id) }, 800L)
+                main.postDelayed({ verifyTargetStillForeground(plan.session.id) }, 1000L)
             }
         }
     }
@@ -160,21 +169,35 @@ object GuardRuntime {
         notifier.guardRunning(begun.session)
         applyEffects(begun)
 
-        main.postDelayed({ verifyTargetStillForeground(begun.session.id) }, 1200L)
+        main.postDelayed({ verifyTargetStillForeground(begun.session.id) }, 1500L)
     }
 
     /**
      * 启动后复核前台。这里是旧实现 F-01/F-06 的直接修复点：
      * 启动被厂商系统拒绝时，必须变成 FAILED，而不是停在 PREPARING 假装在守护。
      */
-    private fun verifyTargetStillForeground(sessionId: String) {
+    /**
+     * 启动后核验目标是否真的在前台。
+     *
+     * 这里必须重试，原因（实机踩到过）：无障碍服务刚连上时 rootInActiveWindow 常返回 null，
+     * 窗口还没就绪；如果一次读不到就判 A11Y_UNAVAILABLE，用户会看到一次莫名其妙的失败，
+     * 而实际上再等几百毫秒就能读到。重试有上限，读不到仍然如实失败，不无限等。
+     */
+    private fun verifyTargetStillForeground(sessionId: String, attempt: Int = 0) {
         val s = current ?: return
         if (s.id != sessionId) return
         if (!SessionStates.isActive(s.state)) return
+
         val observed = lastForeground
+        if (observed == null && attempt < VERIFY_RETRY_MAX) {
+            // 还没读到：再等一小会儿。用 lastForeground 是否仍为 null 判断，
+            // 避免把"上一次的旧前台"当成这一次的结果。
+            main.postDelayed({ verifyTargetStillForeground(sessionId, attempt + 1) }, VERIFY_RETRY_DELAY)
+            return
+        }
         if (observed == null) {
             val detail = if (a11yConnected) {
-                "无障碍服务已连接但读不到前台应用，无法核验是否真的进入目标"
+                "无障碍服务已连接，但连续 " + (attempt + 1) + " 次读不到前台应用"
             } else {
                 "无障碍服务未连接，无法核验前台"
             }
@@ -183,6 +206,10 @@ object GuardRuntime {
         }
         applyEffects(guard.onTargetVerified(s, observed))
     }
+
+    /** 核验重试参数：最多 4 次、每次隔 500ms，合计约 2 秒。够慢的设备也不会误判。 */
+    private const val VERIFY_RETRY_MAX = 4
+    private const val VERIFY_RETRY_DELAY = 500L
 
     fun endByUser(reason: String) {
         val s = current ?: return
@@ -221,10 +248,20 @@ object GuardRuntime {
         applyEffects(guard.onForeground(s, packageName, policy.classify(packageName, selfPackage)))
     }
 
-    /** 用户点覆盖层上的「回到目标」。走和开始相同的启动路径，并核验。 */
+    /**
+     * 用户点覆盖层上的「回到目标」。
+     *
+     * 关键顺序（实机踩到过，必须这样）：先把覆盖层收起来，再启动目标。
+     * 因为覆盖层本身就是当前活动窗口——它挂着时 rootInActiveWindow 读到的是我们自己，
+     * 永远看不到目标是否真的回到前台，核验必然失败，
+     * 于是"回到 Google"点了没反应、状态一直停在 BLOCKING。
+     *
+     * 收起后若核验发现没回去，再把覆盖层挂回来，不静默留在无保护状态。
+     */
     fun returnToTarget() {
         val s = current ?: return
         if (!SessionStates.isActive(s.state)) return
+        overlayHost.hide()
         launchTarget(s)
         main.postDelayed({ verifyReturnedToTarget(s.id) }, 900L)
     }
@@ -237,7 +274,9 @@ object GuardRuntime {
         if (lastForeground == s.targetPackage) {
             applyEffects(guard.onForeground(s, s.targetPackage, AllowPolicy.Verdict.TARGET))
         } else {
-            // 没回去就保持拦截，不谎报成功；重试有上限，避免无限拉回。
+            // 没回去：先把拦截层挂回来（上面为了核验把它收起了），
+            // 否则用户会停在"没有覆盖层、状态却是拦截"的空档里。
+            showOverlay(s, lastForeground ?: s.targetPackage)
             retryCount++
             if (retryCount <= MAX_RETURN_RETRY) {
                 main.postDelayed({ returnToTarget() }, backoffMillis())
@@ -321,7 +360,7 @@ object GuardRuntime {
         val label = sessionLabel(session)
         val ok = overlayHost.show(
             blockedPackage = blockedPackage,
-            reasonText = "这段时间只开放 " + label + "。\n回到 " + label + "，或选择紧急结束。",
+            reasonText = "这段时间只开放 " + label + "。\n回到 " + label + " 继续，或选择紧急结束。",
             targetLabel = label,
             onReturnToTarget = { returnToTarget() },
             onEmergencyEnd = { emergencyEnd() },

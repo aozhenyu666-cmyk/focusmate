@@ -99,9 +99,9 @@ app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
 | 项 | 结果 | 证据 |
 |---|---|---|
 | 编译 | 通过 | `:app:compileDebugKotlin` |
-| JVM 单测 | **133 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
+| JVM 单测 | **144 passed / 0 failed** | `app/build/test-results/testDebugUnitTest` |
 | lint | **0 errors / 10 warnings** | `app/build/reports/lint-results-debug.txt` |
-| debug APK | 23,834,266 bytes | SHA256 `9CE055B07D700B16B7BBEB075EA966369633D09A3751E2F41217B64B1010F3B7` |
+| debug APK | 23,945,338 bytes | SHA256 `88F33E9E05E2B23F1B59533C41E33552D2C4104B21F048F1696A614534FA1C74` |
 
 阶段 2 新增的 81 项单测分布（原 72 + 云端复测整改 9）：
 - `FactEngineTest` 16：三种来源可区分、模型推测被压权、去重窗口、复习、更正退出上下文、
@@ -171,3 +171,26 @@ app/src/test/java/com/focusmate/companion/ 5 个测试类共 70 项
 证明这些用例不是空断言。记录见 ACCEPTANCE「反向验证」列。
 
 **仍待设备验证**：F-01 只证明权限存在，不证明请求成功；UI/通知/TTS/后台/真实模型全部 NOT_RUN。
+
+
+---
+
+# 二次复核整改（2026-10-29）
+
+| 编号 | 问题 | 状态 |
+|---|---|---|
+| R-01 | 旧数据 sourceRef 未迁移，遗忘失效 | 已修，`FactMigration` + load 时执行 |
+| R-02 | 重复陈述只隐藏第一次 | 已修，`sourceUtteranceIds` 多来源并合并 |
+| R-03 | 更正后事项仍带旧依据 | 已修，更正级联作废 + 上下文第二道保险 |
+| R-04 | 免打扰时排到过去的闹钟 | 已修，`WakePlanner.plan` 成为唯一排程入口 |
+
+新增 `FactMigration.kt`、`WakePlanner.kt`、`RepairBoundaryTest.kt`（11 项）。
+每条都用「改回旧行为 → 用例必须失败 → 改回 → 通过」验证，明细见 ACCEPTANCE。
+
+另记一笔本机调试发现（未计入云端结论）：
+在本机模拟器上验证时发现并修掉两个真实缺陷——
+1. 覆盖层自身占用当前窗口，导致 `rootInActiveWindow` 读到自己、看不到目标，
+   「回到目标」点了没反应且状态卡在 BLOCKING。修法：先收覆盖层再启动目标，核验失败再挂回。
+2. 无障碍刚连上时 `rootInActiveWindow` 常为 null，原来一次读不到就判 A11Y_UNAVAILABLE。
+   修法：最多重试 4 次、每次 500ms，仍读不到才如实失败。
+这两条只有本机模拟器的观察，尚未在用户手机上复验。

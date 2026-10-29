@@ -74,10 +74,16 @@ object CompanionContext {
         }
 
         trigger?.let {
-            sb.appendLine("## 这次为什么要开口")
-            sb.appendLine("- 这个话题：" + it.topic)
-            sb.appendLine("- 依据：" + it.evidence)
-            sb.appendLine()
+            // 依据句子若已被用户忘记/更正（hidden），就不能再进模型输入（R-03 的第二道保险：
+            // 正常路径上这类事项已经被作废，这里防止旧数据或竞态把它带进来）。
+            val evidenceHidden = it.evidenceUtteranceId != null &&
+                state.dialogue.any { u -> u.id == it.evidenceUtteranceId && u.hidden }
+            if (!evidenceHidden) {
+                sb.appendLine("## 这次为什么要开口")
+                sb.appendLine("- 这个话题：" + it.topic)
+                sb.appendLine("- 依据：" + it.evidence)
+                sb.appendLine()
+            }
         }
 
         val system = sb.toString().let {

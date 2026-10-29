@@ -22,6 +22,25 @@ object CompanionScheduler {
 
     private const val REQUEST_CODE = 20
 
+    /**
+     * 按 WakePlanner 的结果排闹钟（R-04：必须遵守策略，不能把过去的时刻排进去）。
+     * @param wakeAtMillis 传 null 表示取消。
+     */
+    fun scheduleAt(context: Context, wakeAtMillis: Long?) {
+        if (wakeAtMillis == null) { cancel(context); return }
+        val manager = context.getSystemService(AlarmManager::class.java) ?: return
+        val pi = pendingIntent(context)
+        try {
+            if (canScheduleExact(manager)) {
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeAtMillis, pi)
+            } else {
+                manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeAtMillis, pi)
+            }
+        } catch (t: Throwable) {
+            // 排不上就靠前台服务 tick；不静默假定成功，但也不崩。
+        }
+    }
+
     fun scheduleNext(context: Context, state: CompanionState) {
         val due = nextWakeAt(state) ?: run { cancel(context); return }
         val manager = context.getSystemService(AlarmManager::class.java) ?: return
@@ -41,14 +60,16 @@ object CompanionScheduler {
         context.getSystemService(AlarmManager::class.java)?.cancel(pendingIntent(context))
     }
 
-    /** 下一个该醒的时刻：最近的待发事项，或已排好的下一次主动时间。没有就返回 null。 */
-    fun nextWakeAt(state: CompanionState): Long? {
-        val earliestPending = state.followUps
-            .filter { it.status == FollowUpStatus.PENDING }
-            .minOfOrNull { it.dueAtMillis }
-        val scheduled = state.nextDueAtMillis.takeIf { it > 0L }
-        return listOfNotNull(earliestPending, scheduled).minOrNull()
-    }
+    /**
+     * 下一个该醒的时刻：只看**还没发出去**的事项。
+     *
+     * 不再掺 state.nextDueAtMillis（R-04）：那是"上次排程留下的全局时间"，
+     * 事项取消/失败/空队列时它会残留在过去，导致反复排过期闹钟。
+     * 需要按策略修正的排程请用 WakePlanner.plan + scheduleAt。
+     */
+    fun nextWakeAt(state: CompanionState): Long? = state.followUps
+        .filter { it.status == FollowUpStatus.PENDING }
+        .minOfOrNull { it.dueAtMillis }
 
     private fun canScheduleExact(manager: AlarmManager): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S || manager.canScheduleExactAlarms()

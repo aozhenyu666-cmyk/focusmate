@@ -96,6 +96,14 @@ class BlockOverlay(
         (view?.findViewWithTag<TextView>("body"))?.text = reasonText
     }
 
+    /**
+     * 拦截层外观与 APP 其余页面共用一套设计语言（暖纸底、陶土红、圆角）。
+     *
+     * 为什么不用 Compose：这个 View 挂在无障碍服务的 WindowManager 上，
+     * 用 ComposeView 需要额外的 LifecycleOwner 与 ViewTreeSavedStateRegistryOwner，
+     * 在无障碍窗口里容易踩到生命周期问题。所以这里用纯 View 手绘，
+     * 保持"稳定优先"，样式对齐即可。
+     */
     private fun buildView(
         reasonText: String,
         targetLabel: String,
@@ -105,49 +113,103 @@ class BlockOverlay(
         val density = windowContext.resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
 
+        val paper = Color.parseColor("#FBF7F1")
+        val ink = Color.parseColor("#1E1A15")
+        val inkSoft = Color.parseColor("#6B6157")
+        val clay = Color.parseColor("#C75B39")
+        val claySoft = Color.parseColor("#F6E3DA")
+
         val container = LinearLayout(windowContext).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#FFFDF8"))
+            setBackgroundColor(paper)
             isClickable = true
             isFocusable = true
-            // 吞掉返回键，避免用返回键退出覆盖层（旧实现漏了这一点）。
+            // 吞掉返回键，避免用返回键退出覆盖层。
             setOnKeyListener { _, keyCode, event ->
                 keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP
             }
         }
 
+        // 顶部一枚小圆点，暗示"正在守护"，比纯文字更轻。
+        val dot = View(windowContext).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(clay)
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+            }
+        }
+        container.addView(
+            dot,
+            LinearLayout.LayoutParams(dp(10), dp(10)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = dp(20)
+            },
+        )
+
         val title = TextView(windowContext).apply {
             text = "专注进行中"
-            textSize = 22f
-            setTextColor(Color.parseColor("#1F1B16"))
+            textSize = 26f
+            setTextColor(ink)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
         }
+        container.addView(title)
 
         val body = TextView(windowContext).apply {
             tag = "body"
             text = reasonText
             textSize = 15f
-            setTextColor(Color.parseColor("#5B534A"))
+            setTextColor(inkSoft)
             gravity = Gravity.CENTER
-            setPadding(dp(32), dp(12), dp(32), dp(28))
+            setLineSpacing(dp(6).toFloat(), 1f)
+            setPadding(dp(40), dp(14), dp(40), dp(36))
         }
+        container.addView(body)
 
-        val back = Button(windowContext).apply {
-            text = "回到 $targetLabel"
+        val back = TextView(windowContext).apply {
+            text = "回到 " + targetLabel
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(clay)
+                cornerRadius = dp(16).toFloat()
+            }
+            isClickable = true
             setOnClickListener { onReturnToTarget() }
         }
+        container.addView(
+            back,
+            LinearLayout.LayoutParams(dp(240), dp(52)).apply { bottomMargin = dp(12) },
+        )
 
-        val end = Button(windowContext).apply {
+        val end = TextView(windowContext).apply {
             text = "紧急结束"
+            textSize = 15f
+            setTextColor(clay)
+            gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), Color.parseColor("#E8DFD3"))
+                cornerRadius = dp(16).toFloat()
+            }
+            isClickable = true
             setOnClickListener { onEmergencyEnd() }
         }
+        container.addView(end, LinearLayout.LayoutParams(dp(240), dp(48)))
 
-        container.addView(title)
-        container.addView(body)
-        container.addView(back, LinearLayout.LayoutParams(dp(200), LinearLayout.LayoutParams.WRAP_CONTENT))
-        container.addView(end, LinearLayout.LayoutParams(dp(200), LinearLayout.LayoutParams.WRAP_CONTENT))
+        // 底部说明：把"为什么被拦"和"你现在能做什么"说清楚，
+        // 而不是只留一句冷冰冰的拦截提示。
+        val foot = TextView(windowContext).apply {
+            text = "到点会自动解除。也可以在通知栏结束专注。"
+            textSize = 12f
+            setTextColor(Color.parseColor("#9A8F83"))
+            gravity = Gravity.CENTER
+            setPadding(dp(40), dp(28), dp(40), 0)
+        }
+        container.addView(foot)
+
         return container
     }
 }

@@ -25,7 +25,6 @@ class BootReceiver : BroadcastReceiver() {
             runCatching {
                 val runtime = com.focusmate.companion.CompanionHolder.ensureStarted(context.applicationContext)
                 runtime.tick()
-                com.focusmate.companion.CompanionScheduler.scheduleNext(context.applicationContext, runtime.current())
             }
         }
     }

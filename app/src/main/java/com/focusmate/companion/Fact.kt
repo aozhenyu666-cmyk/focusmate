@@ -25,6 +25,16 @@ data class Fact(
      * 把它从模型输入里排除，而不是全局删一个词（F-02）。
      */
     @SerialName("sourceUtteranceId") val sourceUtteranceId: String? = null,
+
+    /**
+     * 这条事实关联的**全部**原句（二次复核 R-02）。
+     *
+     * 为什么不能只有 sourceUtteranceId：同一句话在用户要求忘掉之前可能说过两次，
+     * add() 的去重分支只刷新计数、不留第二个来源。那样遗忘时只会隐藏第一句，
+     * 第二句还躺在对话里继续发给模型。
+     * 老数据没有这个字段时，由 FactMigration 从 sourceRef 补出来。
+     */
+    @SerialName("sourceUtteranceIds") val sourceUtteranceIds: List<String> = emptyList(),
     @SerialName("createdAt") val createdAt: Long,
     @SerialName("updatedAt") val updatedAt: Long,
     @SerialName("status") val status: FactStatus = FactStatus.ACTIVE,

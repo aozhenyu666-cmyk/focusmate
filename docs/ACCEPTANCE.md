@@ -191,3 +191,35 @@
 5. 记住一条信息 → 更正或忘记 → 继续问相关话题，检查旧信息是否被重新引用（F-02）。
 6. 慢请求期间取消提醒 → 等成功/失败返回 → 确认都不再发出且取消状态不变（F-04）。
 7. 最后测熄屏、省电、进程重建、语音发声与长时间运行。
+
+
+---
+
+# 二次复核整改（2026-10-29）
+
+依据《focusmate-整改二次复核》，核对提交 `078c27c`。四条问题全部确认成立并已修复。
+
+## 逐项处理与反向验证
+
+| 编号 | 问题 | 修复 | 反向验证（改回旧行为必须失败） |
+|---|---|---|---|
+| R-01 | 旧数据只有 `sourceRef`，升级后 `sourceUtteranceId` 为 null，遗忘挡不住原句 | 新增 `FactMigration`：只从能明确解析的 `utterance:<id>` 恢复关联，幂等、不删数据；`load()` 时执行 | 让迁移直接返回 null → `legacySourceRefMustStillSupportForget`、`migrationIsIdempotentAndDoesNotDeleteData` 失败 |
+| R-02 | 遗忘前重复说同一句，只有第一次被隐藏 | `Fact.sourceUtteranceIds` 多来源；`add()` 去重分支合并来源；遗忘/更正隐藏**全部**来源 | 去重分支不合并 → `repeatedStatementBeforeForgetMustAlsoBeHidden` 失败 |
+| R-03 | 更正事实后，关联事项仍带旧依据进提示词 | `correctWithSource` 同步作废以旧句为依据的事项；`CompanionContext` 增加第二道保险：依据句子 hidden 就不渲染 | 不作废事项 → `correctedFactMustNotLeakViaFollowUpEvidence` 失败 |
+| R-04 | 免打扰/专注/上限时仍把过去的时刻排给 AlarmManager | 新增纯函数 `WakePlanner.plan`；`CompanionScheduler.scheduleAt` 只接受策略结果；`nextWakeAt` 不再掺全局 `nextDueAtMillis` | 去掉策略判断 → `quietHoursMustNotRearmAlarmInPast`、`focusAndDailyMaxDeferInsteadOfFiringNow`、`dueItemSchedulesNowNotPast` 三项失败 |
+
+## 本轮自动测试
+
+新增 `RepairBoundaryTest`（11 项），覆盖：旧来源迁移、迁移幂等、重复陈述全隐藏、
+遗忘后重新提供仍正常、更正级联、hidden 依据不渲染、免打扰不排过去、关闭/空队列取消闹钟、
+专注与次数上限推迟、到期即 now 不给过去、等回应不唤醒。
+
+**合计 144 passed / 0 failed**（原 133 + 新增 11）。
+lint 0 errors / 10 warnings。APK 23,945,338 bytes，含 INTERNET（aapt2 实测）。
+
+## 仍未获得证据（不得改为 PASS）
+
+- 真实模型成功/失败两条路径、UI 点击、通知弹出、TTS 发声、真实后台唤醒频率与耗电：**NOT_RUN**。
+- R-04 只证明了"算出来的时间不再落在过去"，没有在设备上测量 WakeLock/Alarm 的实际触发频率。
+- 本轮曾在本机模拟器上拿到过一次拦截层生效与倒计时显示的截图证据，
+  但那是另一套环境（本机 emulator），与本报告的云端环境不同，不合并计算。

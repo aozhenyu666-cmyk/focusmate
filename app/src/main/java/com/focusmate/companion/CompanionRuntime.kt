@@ -61,7 +61,11 @@ class CompanionRuntime(
     fun load() {
         val loaded = store.read()
         if (loaded != null) {
-            state = loaded
+            // 旧数据迁移（R-01）：把 sourceRef 里能明确解析的 "utterance:<id>"
+            // 恢复成来源关联，否则升级前的事实遗忘后仍会泄漏原句。
+            val (migrated, changed) = FactMigration.migrate(loaded)
+            state = migrated
+            if (changed) persist()
         } else if (store.lastError != null) {
             // 读坏不能当成"没有状态"：那会让旧事项悄悄消失。
             onProblem?.invoke(store.lastError!!)
@@ -352,8 +356,17 @@ class CompanionRuntime(
             hasOpenFollowUp = FollowUpEngine.hasOpen(state),
             inFocusSession = focusActive(),
         )
-        // 每次 tick 之后都重排闹钟：事项可能刚被改期/取消，闹钟必须跟着变。
-        CompanionScheduler.scheduleNext(context, state)
+        // 每次 tick 之后都重排闹钟，并且**必须按策略算**（R-04）：
+        // 免打扰/专注中/关闭/次数上限时不能把过去的时刻排进去，否则闹钟一响就立即再响。
+        CompanionScheduler.scheduleAt(
+            context,
+            WakePlanner.plan(
+                state = state,
+                nowMillis = t,
+                minuteOfDay = ::minuteOfDay,
+                inFocusSession = focusActive(),
+            ),
+        )
         if (decision is SchedulePolicy.Decision.Run) {
             val due = FollowUpEngine.dueNow(state, t)
             if (due != null && delivering == null) {
