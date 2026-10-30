@@ -2,6 +2,7 @@ package com.focusmate.ui
 
 import android.content.Context
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +60,9 @@ import java.util.Locale
 @Composable
 fun HomeScreen(runtime: GuardRuntime, transientMessage: MutableState<String>) {
     var tab by remember { mutableStateOf(0) }
+    // 返回键先回到专注页，而不是直接退出 APP。
+    // 原来这里没有任何 BackHandler，在伙伴页按返回会直接退出，体感是「回不去」。
+    BackHandler(enabled = tab != 0) { tab = 0 }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopSwitcher(selected = tab, onSelect = { tab = it })
         if (tab == 0) FocusTab(runtime, transientMessage) else CompanionScreen()

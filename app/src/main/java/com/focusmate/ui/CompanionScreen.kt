@@ -1,5 +1,6 @@
 package com.focusmate.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,6 +67,9 @@ import java.util.Locale
 fun CompanionScreen() {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(0) }
+    // 子页之间也要能退：返回键先回到「对话」，再退才回到专注页。
+    // Compose 的 BackHandler 后注册者优先，所以这里的优先级高于外层 HomeScreen。
+    BackHandler(enabled = tab != 0) { tab = 0 }
     var state by remember { mutableStateOf<CompanionState?>(null) }
     val messages = remember { mutableStateListOf<Utterance>() }
     var draft by remember { mutableStateOf("") }
