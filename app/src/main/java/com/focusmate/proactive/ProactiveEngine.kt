@@ -32,6 +32,8 @@ class ProactiveEngine(
 ) {
 
     private val store = FileProactiveStore(File(context.filesDir, "proactive/state.json"))
+    /** 配置单独一个文件：它属于「用户偏好」，不该混进每天滚动的运行状态里。 */
+    private val configStore = FileProactiveConfigStore.at(context.filesDir)
     private val notifier = com.focusmate.notify.Notifier(context)
     private val randomEngine = RandomTriggerEngine(random)
     private val random = random
@@ -96,6 +98,10 @@ class ProactiveEngine(
     fun load(): ProactiveState {
         state = store.read() ?: ProactiveState()
         store.lastError?.let { emit("状态读取失败：" + it) }
+        // 配置也要恢复。原来只读状态不读配置，进程重启后用户改过的频率全部回默认值。
+        // 读不到（首次启动 / 文件损坏）就用默认值，不影响主动功能本身。
+        configStore.read()?.let { config = it }
+        configStore.lastError?.let { emit("配置读取失败：" + it) }
         return state
     }
 
@@ -104,6 +110,10 @@ class ProactiveEngine(
     fun updateConfig(next: ProactiveConfig) {
         config = next
         persist()
+        // 原来这里只 persist 状态、不 persist 配置，重启即回默认值。
+        // 界面承诺「改这里会立刻生效」，那就得真的记住。
+        runCatching { configStore.write(next) }
+            .onFailure { Log.w(TAG, "配置写入失败: " + (it.message ?: it.javaClass.simpleName)) }
     }
 
     /**
