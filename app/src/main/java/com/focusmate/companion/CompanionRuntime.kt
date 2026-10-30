@@ -127,6 +127,37 @@ class CompanionRuntime(
         runCatching { ModelSettings.testConnection(ModelSettings.load(context).config) }
             .getOrElse { ModelResult.Failed("测试过程出错：" + (it.message ?: it.javaClass.simpleName)) }
 
+    // ---------------------------------------------------------------- 供主动引擎使用的只读/受限接口
+    // 刻意只暴露最小面：不让 proactive 包反向操作伙伴内部状态。
+
+    /** 借用已配置好的模型客户端。 */
+    fun modelClientForProactive(): com.focusmate.companion.ModelClient = modelClient
+
+    /** 距用户上次说话多少毫秒；没说过返回 Long.MAX_VALUE。 */
+    fun millisSinceUserSpoke(): Long {
+        val t = state.lastUserSpeakAtMillis
+        return if (t <= 0L) Long.MAX_VALUE else (now() - t).coerceAtLeast(0L)
+    }
+
+    /** 可用于闲聊的旧话题：取最近对话里用户说过的、有实质内容的句子。最多 5 条。 */
+    fun recentTopicsForProactive(): List<String> =
+        state.dialogue
+            .filter { it.role == Utterance.Role.USER && !it.hidden && it.text.length >= 6 }
+            .takeLast(5)
+            .map { it.text.take(40) }
+            .reversed()
+
+    /** 代播一条主动消息。TTS 关闭时返回 false，由调用方当作「无语音」。 */
+    fun speakForProactive(utteranceId: String, text: String): Boolean {
+        if (!state.config.ttsEnabled) return false
+        return speech.speak(utteranceId, text)
+    }
+
+    /** 用户回了话：通知主动引擎抬升互动度。 */
+    fun notifyUserReplied() {
+        com.focusmate.proactive.ProactiveRuntime.peek()?.onUserReplied()
+    }
+
     /** 开关系统语音。关掉后只发文字。 */
     fun setTtsEnabled(enabled: Boolean): Boolean {
         state = state.copy(

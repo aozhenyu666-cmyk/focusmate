@@ -77,6 +77,15 @@
             android:name=".alarm.ExpiryReceiver"
             android:exported="false" />
 
+        <service
+            android:name=".proactive.ProactiveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="proactive_companion_engine" />
+        </service>
+
         <receiver
             android:name=".companion.CompanionWakeReceiver"
             android:exported="false">

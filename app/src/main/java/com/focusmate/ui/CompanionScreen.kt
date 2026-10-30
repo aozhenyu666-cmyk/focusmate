@@ -1,5 +1,6 @@
 package com.focusmate.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,7 @@ import com.focusmate.companion.FollowUpStatus
 import com.focusmate.companion.ModelSettings
 import com.focusmate.companion.Utterance
 import com.focusmate.companion.label
+import com.focusmate.proactive.ProactiveRuntime
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -66,6 +68,9 @@ import java.util.Locale
 fun CompanionScreen() {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(0) }
+    // 子页之间也要能退：返回键先回到「对话」，再退才回到专注页。
+    // Compose 的 BackHandler 后注册者优先，所以这里的优先级高于外层 HomeScreen。
+    BackHandler(enabled = tab != 0) { tab = 0 }
     var state by remember { mutableStateOf<CompanionState?>(null) }
     val messages = remember { mutableStateListOf<Utterance>() }
     var draft by remember { mutableStateOf("") }
@@ -561,6 +566,8 @@ private fun SettingsTab(current: CompanionState?) {
     val scope = rememberCoroutineScope()
     val snapshot = remember { ModelSettings.load(context) }
     val c = current?.config
+    // 改完主动频率后用来触发重组：ProactiveRuntime 不是 State，不会自己刷新界面。
+    var proactiveTick by remember { mutableStateOf(0) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -692,16 +699,58 @@ private fun SettingsTab(current: CompanionState?) {
                 }
                 if (c != null) {
                     Hairline()
+                    // 下面四行读的是 CompanionConfig，也就是「约定 / 跟进 / 没说完的事」那套。
+                    // 真正决定随机主动闲聊频率的是 ProactiveConfig，两者差一个量级
+                    // （旧的 90~240 分钟 vs 新的每小时 6 次），混在一起显示会让人以为它几乎不开口。
+                    Text(
+                        "按约定和没说完的事",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     MetaRow("间隔", (c.gapMinMillis / 60000).toString() + " ~ " + (c.gapMaxMillis / 60000).toString() + " 分钟")
                     MetaRow("每天最多", c.dailyMax.toString() + " 次")
                     MetaRow("免打扰", clockText(c.quietStartMinute) + " ~ " + clockText(c.quietEndMinute))
                     MetaRow("失败重试", (c.retryMillis / 60000).toString() + " 分钟，最多 " + c.maxAttempts.toString() + " 次")
                 }
-                Text(
-                    "这些是保守默认值，还没按你的偏好定过。改这里会立刻生效。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+
+                Hairline()
+                // 随机主动闲聊：读引擎里的真实配置，并且可以改。
+                // remember(proactiveTick) 是刷新开关——改完 updateConfig 不会通知 Compose。
+                val proactiveCfg = remember(proactiveTick) { ProactiveRuntime.peek()?.config }
+                if (proactiveCfg != null) {
+                    Text("随机主动闲聊", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "每小时约 " + proactiveCfg.hourlyOpportunities + " 次机会 · 免打扰 " +
+                            clockText(proactiveCfg.quietStartMinute) + " ~ " + clockText(proactiveCfg.quietEndMinute),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(3 to "安静", 6 to "正常", 12 to "活跃").forEach { (n, label) ->
+                            // 显式标 Unit：末尾的 proactiveTick++ 会让 lambda 推断成返回 Int。
+                            val onClick: () -> Unit = {
+                                ProactiveRuntime.peek()?.updateConfig(proactiveCfg.copy(hourlyOpportunities = n))
+                                proactiveTick++
+                            }
+                            if (proactiveCfg.hourlyOpportunities == n) {
+                                Button(onClick = onClick, shape = MaterialTheme.shapes.extraLarge) { Text(label) }
+                            } else {
+                                OutlinedButton(onClick = onClick, shape = MaterialTheme.shapes.extraLarge) { Text(label) }
+                            }
+                        }
+                    }
+                    Text(
+                        "改完立刻生效，并会记住——重启后仍是你选的这一档。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "主动引擎还没启动。打开一次伙伴页或等开机恢复后，就能在这里调频率。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 

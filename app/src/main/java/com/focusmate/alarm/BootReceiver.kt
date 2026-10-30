@@ -26,6 +26,13 @@ class BootReceiver : BroadcastReceiver() {
                 val runtime = com.focusmate.companion.CompanionHolder.ensureStarted(context.applicationContext)
                 runtime.tick()
             }
+
+            // 主动引擎必须在这里单独拉起：它不在伙伴链路上，
+            // 少了这一行 ProactiveService 永远不会启动，「主动开口」等于没实现。
+            // 单独一个 runCatching，它失败不影响上面的专注与伙伴恢复。
+            runCatching {
+                com.focusmate.proactive.ProactiveRuntime.ensureService(context.applicationContext)
+            }
         }
     }
 }
