@@ -148,7 +148,12 @@ PR：https://github.com/aozhenyu666-cmyk/focusmate/pull/1
 
 ---
 
-## 6. 阻塞问题：AAPT 资源链接故障
+## 6. 阻塞问题：AAPT 资源链接故障（✅ 已解决，根因见第 11 节）
+
+> **2026-10-30 更新：这不是 AAPT 的问题，也不是代码问题。**
+> 根因是 Gradle 缓存里那份 `aapt2.exe` 在本机无法写文件，报的「数据无效 (13)」是个假错误。
+> 下面「已排除的可能」那 10 项为什么全都无效、正确的修法、以及真机验收结果，见第 11 节。
+> 本节的排查时间线**保留原样**，因为它记录了错误的方向是怎么形成的。
 
 ### 现象
 
@@ -291,10 +296,10 @@ data class HostSnapshot(
 | GitHub 分支 | ✅ `feat/proactive-engine-v1` |
 | 提交 SHA | ✅ `a617c1017ce464de3eadc930fbe5f660abd8f3a3` |
 | PR 链接 | ✅ https://github.com/aozhenyu666-cmyk/focusmate/pull/1 |
-| APK 下载链接 | ❌ **未产出**（构建失败） |
-| APK SHA-256 | ❌ 无 |
-| 单元测试 | ❌ NOT_RUN |
-| 真机验收 | ❌ NOT_RUN |
+| APK 下载链接 | ✅ 已产出（2026-10-30，见第 11 节） |
+| APK SHA-256 | ✅ 见第 11 节 |
+| 单元测试 | ✅ 192 passed / 0 failed（原 NOT_RUN） |
+| 真机验收 | ⚠️ 部分通过（模拟器 API 34，见第 11 节） |
 
 ---
 
@@ -303,3 +308,181 @@ data class HostSnapshot(
 1. **先修构建，别再写代码。** 现在堆功能只是在没有反馈的情况下加班。构建修好、16 项测试跑通，才能判断逻辑对不对。
 2. **优先验「后台不打开 UI 也能发消息」这一条。** 这是整个需求的核心，也是旧实现真正坏掉的地方。其他都是锦上添花。
 3. **C 盘只剩约 5 GB。** 这个项目构建需要 2~3 GB，长期会反复出问题。清一下空间或换盘，比修代码更急。
+
+
+---
+
+# 11. 2026-10-30 续：构建故障根因 + 三个致命缺陷
+
+> 本节由接手的人在模拟器上实测后补写。**第 1～10 节的结论不删，但其中「构建故障未定位」「真机全部 NOT_RUN」两条已经过时。**
+
+## 11.1 构建故障：根因是 aapt2 二进制写不了文件
+
+**结论：不是 AAPT 的资源问题，不是代码问题，也不是 build 目录残留。**
+
+排查路径（可复现）：
+
+1. 干净 clone 到 `C:\fm2`（纯 ASCII 路径、全新 build 目录、同 SDK、同 Gradle 缓存）→ **同一个错误**。
+   这一步同时排除了「代码问题」和「build 目录脏」。
+2. `--info` 抓 aapt2 真实命令行，发现传的是 `--emit-ids`（**写**文件），不是 `--stable-ids`（读）。
+   所以是 aapt2 **创建** `stableIds.txt` 失败，而错误文案里的「数据无效 (13)」是 Windows 残留错误码，不是真实原因。
+3. 同一命令、同一路径、同一台机器，只换 aapt2 二进制：
+
+| aapt2 来源 | 结果 |
+|---|---|
+| `C:\gh\caches\8.11.1\transforms\...\aapt2-8.7.3-12006047-windows\aapt2.exe` | 写不出任何文件，报「数据无效 (13)」 |
+| `C:\Android\Sdk\build-tools\35.0.0\aapt2.exe` | **正常写出 13990 字节** |
+
+4. 坏 aapt2 与路径无关：绝对路径、相对路径、目标文件预先存在，**全部失败**；
+   删掉 transform 缓存让它重新解压，**仍然失败**。
+
+**所以第 6 节那 10 项排查为什么全都无效**：它们改的是目录、缓存、磁盘空间，
+而每一份重新解压出来的 aapt2 都还是坏的。文件系统本身没问题（手工写文件成功也印证了这点）。
+
+**修法（项目代码零改动，写在全局配置里）：**
+
+```
+# C:\gh\gradle.properties   （即 GRADLE_USER_HOME/gradle.properties）
+android.aapt2FromMavenOverride=C:/Android/Sdk/build-tools/35.0.0/aapt2.exe
+```
+
+**没有采用的两条路**（记下来省下一个人时间）：
+
+- `buildToolsVersion = "34.0.0"` **无效**。AGP 8.7.3 用自己 bundle 的 aapt2，不看 SDK build-tools。
+  第 6 节「可以继续试的第 1 条」是死路。
+- 把工程 clone 到含中文的路径（如 `C:\Users\敖震宇\...`）会先撞 AGP 的非 ASCII 路径检查，
+  报 `Your project path contains non-ASCII characters`。那是另一个问题，别和 AAPT 混为一谈。
+
+## 11.2 构建修好后暴露的三个缺陷（都已修）
+
+### A. `ProactiveService` 没有任何地方启动（致命）
+
+`ProactiveRuntime.ensureService()` 是唯一启动入口，**全仓库零调用点**；
+外部对 proactive 包的唯一引用是 `CompanionRuntime.kt:158` 的 `peek()`，
+而 `peek()` 只返回已存在的实例——从没启动过就永远返回 null。
+
+**后果：APK 装到手机上，服务一次都不会跑，主动功能等于没实现。**
+192 项单元测试全绿也测不出来，因为测试覆盖的是纯逻辑类，没人测「接线」。
+
+修：
+
+- `alarm/BootReceiver.kt`：开机/覆盖安装后拉起（原本只拉了伙伴链路）。
+- `ui/MainActivity.kt`：首次安装还没重启过手机时收不到开机广播，靠这里兜底。
+- 两处都用独立 `runCatching`，主动链路失败不影响专注与伙伴恢复。
+
+### B. 机会排期死锁（致命，比 A 更隐蔽）
+
+`ProactiveEngine.tick()` 里摇骰在「机会时间检查」**之前**：
+
+```kotlin
+decision = decide()                      // 每 20 秒都摇
+if (!decision.hit) { nextOpportunity = now + 6~60min }   // 机会被不断推远
+if (nextOpportunity > t) return WAIT     // 于是永远成立
+```
+
+两层后果：
+
+1. 摇骰频率被 20 秒 tick 放大成每小时上百次，「每小时 6 次机会」名存实亡；
+2. **机会永远追不上**，`windowCount` 恒为 0，一条消息都发不出去。
+
+实测证据（修复前）：`state.json` 的 `nextOpportunityAtMillis` 连续三次读取一路后移
+（08:02 → 08:42 → 08:31），`windowCount` 一直是 0。
+
+修：把「机会没到就返回」移到 `decide()` **之前**。一次机会消耗一次骰子，未中就等下一个机会。
+
+**这个缺陷配了模型 Key 也救不了**，是「不主动」的第三个根因。
+
+### C. 闸门拦截与未命中完全不留痕（阻塞验收）
+
+`GATED` / `MISS` 分支不写任何日志，`logcat -s ProactiveEngine` 是一片空白，
+根本分不清「服务没跑」「被免打扰拦住」「摇骰没中」。
+第 7 节的验证命令让人看这个日志，实际大概率什么都看不到。
+
+修：加 `lastSkipReason`，**原因变化时**打一行（原因不变不重复，避免每 20 秒刷屏）。
+
+## 11.3 模拟器实测记录
+
+环境：`emulator-5554`，`dsh_pixel_api34`（API 34），Android SDK 在 `D:\code\android-sdk`，
+模型为 DeepSeek `deepseek-flash`（OpenAI 兼容，endpoint 必须填到 `/chat/completions`，客户端把它当完整 URL）。
+
+两个环境坑（下次会再遇到）：
+
+- 用 `D:\code\android-sdk\platform-tools\adb.exe`。C 盘那个会和它抢 daemon，导致每条命令第一条必然 `device offline`。
+- 模拟器时区是 GMT。要验白天时段必须 `adb root` 后 `setprop persist.sys.timezone Asia/Shanghai`，否则一直落在 23:00–08:00 免打扰里。
+
+实测日志（修复后）：
+
+```
+I ProactiveEngine: 未开口：GATED · 免打扰时段
+I ProactiveEngine: 未开口：MISS · 未命中 p=0.41 roll=0.46
+I ProactiveEngine: 未开口：WAIT · 还没到下一次机会
+I ProactiveEngine: 已投递[NOTIFIED] 这天看着要下雨，我坐着坐着都有点犯困了。
+```
+
+`p=0.41` 与公式 `0.5 × 0.7(8点权重) × (1 + 0.35×0.5)` 吻合，说明概率链路正确。
+
+`state.json` 落盘（模拟器 `run-as com.focusmate cat files/proactive/state.json`）：
+
+```json
+"trigger": "random_small_talk",
+"reason": "没什么特别的事，只是想找你说句话",
+"state": "notified",  "notificationId": 5000,
+"generatedAt": 1793319635821, "notifiedAt": 1793319635901, "ttsAt": 1793319635909,
+"sentToday": 1, "windowCount": 1
+```
+
+关键点：
+
+- `notificationId = 5000` 是独立 ID，不是原来会互相覆盖的固定 `1003`（缺陷 8 的修复生效）；
+- `random_small_talk` 证明「无记忆、无待办」时仍有兜底情境（缺陷 6 的修复生效）；
+- `notifiedAt - generatedAt = 80ms`、`ttsAt - notifiedAt = 8ms`，四态分离按设计推进；
+- 通知栏 `dumpsys notification` 里能看到 `pkg=com.focusmate id=5000`，截图已留档。
+
+产物：
+
+```
+app-debug.apk   23,892,410 bytes
+SHA-256         e39d838f598e95ae3942af58694ef17ca5ae36c388c30a757192d13a91e20850
+```
+
+## 11.4 验收表更新
+
+| 原第 7 节项目 | 原状态 | 现状态 |
+|---|---|---|
+| 不进入聊天页面，后台能生成并发布主动消息 | NOT_RUN | **通过** |
+| 没有待办事项时仍有自主闲聊机会 | NOT_RUN | **通过**（`random_small_talk`） |
+| 没有历史记忆时也能产生通用闲聊 | NOT_RUN | **通过**（全新安装无记忆） |
+| 不同随机种子产生不同触发分布 | NOT_RUN | **通过**（单元测试 16 项） |
+| 通知、TTS、UI 互不成为单点故障 | NOT_RUN | **部分**：通知与 TTS 独立推进时间戳；TTS 是否真发声未听 |
+| 重启后恢复待发送事项，不集中补发过期消息 | NOT_RUN | 未验 |
+| 连续 60 分钟高频模拟，记录候选与实际触发次数 | NOT_RUN | 未验 |
+| 连续不回应时正确退避 | NOT_RUN | 未验 |
+| 用户回复后对话自然延续 | NOT_RUN | 未验 |
+| 模型失败 / 网络断开 / 通知被禁用时准确留痕 | NOT_RUN | **部分**：代码路径有 `模型失败：` 与 `未配置模型，跳过` 两种留痕，未逐个制造故障验证 |
+| 专注模式及免打扰期间不插话 | NOT_RUN | **部分**：免打扰已验证（GATED）；专注中禁言未验 |
+| 原有专注与解锁功能回归 | NOT_RUN | 未验 |
+
+## 11.5 已发现但**未修**的问题
+
+1. **配置不持久化**：`ProactiveEngine.config` 只在内存里，`updateConfig()` 只 `persist()` 状态，
+   而 `ProactiveState` 不包含 config。进程重启后所有配置回默认值。
+   是否要修取决于之后有没有 UI 入口——现在 proactive 没有设置界面，等于只能用默认值。
+2. **proactive 没有任何 UI 入口**：开关、模式、频率都改不了，用户只能接受默认（DAILY / 每小时 6 次 / 23:00–08:00）。
+   如果产品要求可调，这块要补界面，同时必须一起修上面那条。
+3. 第 7 节的验证命令 `am start-foreground-service com.focusmate/.proactive.ProactiveService`
+   **是错的**：服务是 `exported="false"`，adb shell 会报 `Requires permission not exported`。
+   正确做法是通过打开 APP（`am start -n com.focusmate/.ui.MainActivity`）让它自己拉起。
+4. `ProactiveService` 的 `onStartCommand` 会经 `ProactiveRuntime.engine()` 连带启动 `CompanionService`，
+   两个前台服务在同一时刻启动。目前工作正常，但没有针对性验证厂商省电策略下的表现。
+
+## 11.6 本轮改动清单
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `alarm/BootReceiver.kt` | +7 | 开机恢复时拉起主动引擎 |
+| `ui/MainActivity.kt` | +5 | 首次安装后兜底拉起 |
+| `proactive/ProactiveEngine.kt` | +40/-6 | 排期死锁修复 + 诊断留痕 |
+| `gradle.properties`（全局 `C:\gh\`，**不入库**） | +1 | aapt2 覆盖 |
+
+单元测试：**192 passed / 0 failed**（原 176 既有 + 16 新增）。
+

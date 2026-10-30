@@ -40,6 +40,15 @@ class ProactiveEngine(
     var config: ProactiveConfig = ProactiveConfig()
         private set
 
+    /**
+     * 上一次「没开口」的原因。只在原因变化时打日志。
+     *
+     * 为什么需要它：被闸门拦住或概率没中时原本一行日志都不留，
+     * 设备上 `logcat -s ProactiveEngine` 会是空白，
+     * 根本分不清是「服务没跑」「被免打扰拦住」还是「摇骰没中」。
+     */
+    private var lastSkipReason: String? = null
+
     /** 外部注入的宿主状态，避免直接依赖专注模块。 */
     var hostState: () -> HostSnapshot = { HostSnapshot.EMPTY }
 
@@ -137,18 +146,37 @@ class ProactiveEngine(
             importantFollowUpDueSoon = host.dueSoonTopic != null,
         )
 
-        val decision = randomEngine.decide(input)
-        if (!decision.hit) {
-            // 未命中/被拦：排下一次机会，然后什么都不做。不调模型。
-            state = state.copy(nextOpportunityAtMillis = randomEngine.nextOpportunityMillis(input))
-            persist()
-            return TickResult(decision.verdict.name, decision.reason, false)
-        }
-
-        // 命中：确认还没到下一次机会时间（避免同一秒连续触发）。
+        // 机会没到就什么都不做——包括不摇骰。
+        //
+        // 原来的顺序是先 decide 再查机会时间，问题有两层：
+        // 1. 每个 tick（20 秒）都摇一次，把「每小时 N 次机会」放大成每小时上百次；
+        // 2. 每次未命中都把 nextOpportunityAtMillis 重排到未来 6~60 分钟，
+        //    于是机会永远追不上，命中一次也永远过不了下面的时间检查——
+        //    结果是 windowCount 恒为 0，一条都发不出去。
         if (state.nextOpportunityAtMillis > t) {
+            val why = "WAIT · 还没到下一次机会"
+            if (why != lastSkipReason) {
+                lastSkipReason = why
+                emit("未开口：" + why)
+            }
             return TickResult("WAIT", "还没到下一次机会", false)
         }
+
+        val decision = randomEngine.decide(input)
+        if (!decision.hit) {
+            // 这次机会没用上：排下一次，本次作废。不调模型。
+            state = state.copy(nextOpportunityAtMillis = randomEngine.nextOpportunityMillis(input))
+            persist()
+            // 留一行诊断。原因不变就不重复打，避免每 20 秒刷屏。
+            val why = decision.verdict.name + " · " + decision.reason
+            if (why != lastSkipReason) {
+                lastSkipReason = why
+                emit("未开口：" + why)
+            }
+            return TickResult(decision.verdict.name, decision.reason, false)
+        }
+        // 命中后清掉上次的拦截原因，下次被拦时才会重新打出来。
+        lastSkipReason = null
 
         // 选情境。没有候选就不说话（不硬凑）。
         val candidates = ContextTriggerEngine.candidates(
